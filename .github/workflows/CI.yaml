@@ -24,8 +24,14 @@ jobs:
           name: paolino
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
       - name: Build executable
-        run: nix build -L .#csmt-utxo
+        run: nix build .#csmt-utxo
       - name: Build docker image
-        run: nix build -L .#docker-image
+        run: nix build .#docker-image -o output-docker-image
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: csmt-utxo-image
+          path: output-docker-image
       - name: Build tarball
-        run: nix build -L .#linux64.tarball
+        if: false
+        run: nix build .#linux64.tarball
