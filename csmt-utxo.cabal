@@ -102,12 +102,8 @@ library
   -- Other library packages from which modules are imported.
   build-depends:
     , base
-    , bytestring
     , containers
-    , crypton
-    , memory
     , mtl
-    , time
 
   -- Directories containing source files.
   hs-source-dirs:   src
@@ -164,11 +160,9 @@ test-suite unit-test
   -- Test dependencies.
   build-depends:
     , base
-    , bytestring
     , containers
     , csmt-utxo
     , hspec
-    , hspec-discover
     , QuickCheck
 
   build-tool-depends: hspec-discover:hspec-discover
