@@ -10,5 +10,5 @@ packages:
 source-repository-package
   type: git
   location: https://github.com/paolino/sparse-merkle-trees
-  tag: 306ef3c608876591a445899362319cf23c889721
-  --sha256: sha256-4xFMU+xEek4BaIcu1Zaf/HGrFDaWE4muP5Yn7LFxKHM=
+  tag: 082280d772a92511a9324a429e58a0535cf5da6b
+  --sha256: sha256-V9OuwDoHXB0/yzeZNZ5iGAkidBmmFmcfm+AR/TmEEX4=
