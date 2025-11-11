@@ -13,6 +13,7 @@ import CSMT
     , pureCSMT
     , runPure
     )
+import Data.Foldable (foldl')
 import Data.Functor ((<&>))
 import Data.List (isPrefixOf)
 import Data.Map qualified as Map
@@ -159,7 +160,7 @@ spec = do
                 inserted kvs `shouldBe` summed n kvs
 
 inserted :: [(Key, Int)] -> Map Key (Indirect Int)
-inserted = foldl (\m (k, v) -> mk m k v) []
+inserted = foldl' (\m (k, v) -> mk m k v) []
 
 summed :: Int -> [(Key, Int)] -> Map Key (Indirect Int)
 summed n kvs =

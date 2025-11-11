@@ -1,0 +1,19 @@
+cradle:
+  cabal:
+    - path: "./src"
+      component: "lib:csmt-utxo"
+
+    - path: "././app/main.hs"
+      component: "csmt-utxo:exe:csmt-utxo"
+
+    - path: "././"
+      component: "csmt-utxo:test:unit-test"
+
+    - path: "././main-exe.hs"
+      component: "csmt-utxo:exe:unit-tests-exe"
+
+    - path: "././CSMTSpec.hs"
+      component: "csmt-utxo:exe:unit-tests-exe"
+
+    - path: "CI/rewrite-libs/src/rewrite-libs.hs"
+      component: "rewrite-libs:exe:rewrite-libs"

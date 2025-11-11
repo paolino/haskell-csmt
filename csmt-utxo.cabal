@@ -140,27 +140,18 @@ executable csmt-utxo
   -- Base language which the package is written in.
   default-language: Haskell2010
 
-test-suite unit-test
+common unit-test-common
   -- Import common warning flags.
   import:             warnings
 
   -- Base language which the package is written in.
   default-language:   Haskell2010
 
-  -- Modules included in this executable, other than Main.
-  other-modules:
-
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
 
-  -- The interface type and version of the test suite.
-  type:               exitcode-stdio-1.0
-
   -- Directories containing source files.
   hs-source-dirs:     test
-
-  -- The entrypoint to the test suite.
-  main-is:            Main.hs
 
   -- Test dependencies.
   build-depends:
@@ -171,4 +162,20 @@ test-suite unit-test
     , QuickCheck
 
   build-tool-depends: hspec-discover:hspec-discover
-  other-modules:      CSMTSpec
+
+test-suite unit-test
+  import:        unit-test-common
+
+  -- The interface type and version of the test suite.
+  type:          exitcode-stdio-1.0
+
+  -- The entrypoint to the test suite.
+  main-is:       main.hs
+  other-modules: CSMTSpec
+
+executable unit-tests-exe
+  -- Import common warning flags.
+  import:        unit-test-common
+  ghc-options:   -O1 -threaded -rtsopts -with-rtsopts=-N
+  main-is:       main-exe.hs
+  other-modules: CSMTSpec
