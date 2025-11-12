@@ -48,6 +48,7 @@ library
     App
     CSMT
     CSMT.Backend.Pure
+    CSMT.Backend.RocksDB.Key
     CSMT.Hashes
     CSMT.Insertion
     CSMT.Interface
@@ -56,11 +57,13 @@ library
   build-depends:
     , base
     , bytestring
+    , cereal
     , containers
     , crypton
     , memory
     , transformers
 
+  -- , rocksdb-haskell-jprupp
   hs-source-dirs:   src
   default-language: Haskell2010
 
@@ -80,6 +83,7 @@ common unit-test-common
   hs-source-dirs:     test
   build-depends:
     , base
+    , bytestring
     , containers
     , csmt-utxo
     , hspec
@@ -91,10 +95,14 @@ test-suite unit-test
   import:        unit-test-common
   type:          exitcode-stdio-1.0
   main-is:       main.hs
-  other-modules: CSMTSpec
+  other-modules:
+    CSMT.Backend.RocksDB.KeySpec
+    CSMTSpec
 
 executable unit-tests-exe
   import:        unit-test-common
   ghc-options:   -O1 -threaded -rtsopts -with-rtsopts=-N
   main-is:       main-exe.hs
-  other-modules: CSMTSpec
+  other-modules:
+    CSMT.Backend.RocksDB.KeySpec
+    CSMTSpec

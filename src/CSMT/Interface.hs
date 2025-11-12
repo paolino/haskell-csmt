@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE StrictData #-}
 
 module CSMT.Interface
@@ -13,6 +14,7 @@ module CSMT.Interface
     , Query
     , CSMT (..)
     , fromBool
+    , toBool
     )
 where
 
@@ -21,8 +23,13 @@ data Direction = L | R deriving (Show, Eq, Ord)
 
 -- | Convert Bool to Direction
 fromBool :: Bool -> Direction
-fromBool True = L
-fromBool False = R
+fromBool True = R
+fromBool False = L
+
+-- Convert Direction to its Bool representation
+toBool :: Direction -> Bool
+toBool L = False
+toBool R = True
 
 -- | Get the opposite direction
 opposite :: Direction -> Direction
@@ -40,7 +47,7 @@ data Indirect a = Indirect
     { jump :: Key
     , value :: a
     }
-    deriving (Show, Eq)
+    deriving (Show, Eq, Functor)
 
 -- | Type alias for an insert function in some monad m. It support batch inserts.
 type Insert m a = [(Key, Indirect a)] -> m ()
