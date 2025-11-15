@@ -1,50 +1,87 @@
 module CSMT.Deletion
     ( deleting
+    , newDeletionPath
+    , DeletionPath (..)
+    , deletionPathToOps
     )
 where
 
 import CSMT.Interface
     ( CSMT (..)
+    , Direction (..)
     , Indirect (..)
     , Key
     , Op (..)
     , Query
+    , compareKeys
+    , opposite
     )
+import Control.Monad (guard)
+import Control.Monad.Trans.Maybe (MaybeT (..))
 
--- Path to the keys to delete
-data Compose a
-    = Compose Key a (Compose a)
-    | Leaf Key Key
-    deriving (Show, Eq)
+data DeletionPath a where
+    Value :: Key -> a -> DeletionPath a
+    Branch
+        :: Key -> Direction -> DeletionPath a -> Indirect a -> DeletionPath a
 
--- | Change a value into a CSMT
-deleting
-    :: Monad m
-    => CSMT m a
-    -- ^ Backend interface of the CSMT
-    -> Key
-    -- ^ Key to delete at
-    -> m ()
-deleting (CSMT i q) key = do
-    c <- mkCompose q key
-    i $ scanCompose c
+deriving instance Show a => Show (DeletionPath a)
+deriving instance Eq a => Eq (DeletionPath a)
 
--- Scan a Compose tree and produce the resulting hash and list of inserts and one deletion
-scanCompose :: Compose a -> [Op a]
-scanCompose = go []
+addWithDirection :: (a -> a -> a) -> Direction -> a -> a -> a
+addWithDirection add L left right = add left right
+addWithDirection add R left right = add right left
+
+deleting :: Monad m => CSMT m a -> (a -> a -> a) -> Key -> m ()
+deleting csmt add key = do
+    mpath <- newDeletionPath (query csmt) key
+    case mpath of
+        Nothing -> pure ()
+        Just path -> change csmt $ deletionPathToOps add path
+
+deletionPathToOps
+    :: (a -> a -> a)
+    -> DeletionPath a
+    -> [Op a]
+deletionPathToOps add = snd . go []
   where
-    go k (Leaf l r) = [Delete $ k <> l, Delete $ k <> r]
-    go k (Compose j h down) =
-        let k' = k <> j
-            rs = go k' down
-        in  Insert k (Indirect{jump = j, value = h}) : rs
+    go k (Value _ _v) = (Nothing, [Delete k])
+    go k (Branch j d v i) =
+        let
+            (msb, xs) = go (k <> j <> [d]) v
+        in
+            case msb of
+                Just v' ->
+                    let h = addWithDirection add d v' (value i)
+                    in  ( Just h
+                        , xs <> [Insert k $ Indirect{jump = j, value = h}]
+                        )
+                Nothing ->
+                    ( Just (value i)
+                    , xs
+                        <> [ Insert k
+                                $ Indirect{jump = j <> jump i <> [opposite d], value = value i}
+                           , Delete (k <> j <> [opposite d])
+                           ]
+                    )
 
--- Build a Compose tree for inserting a value at a given key
-mkCompose
-    :: forall a m
-     . Query m a
+newDeletionPath
+    :: forall m a
+     . Monad m
+    => Query m a
     -> Key
-    -> m (Compose a)
-mkCompose _get key = go key []
+    -> m (Maybe (DeletionPath a))
+newDeletionPath q = runMaybeT . go []
   where
-    go = undefined
+    go :: Key -> Key -> MaybeT m (DeletionPath a)
+    go current remaining = do
+        Indirect{jump = j, value = v} <- MaybeT $ q current
+        let (_common, other, remaining') = compareKeys j remaining
+        guard $ null other
+        case remaining' of
+            [] -> pure $ Value j v
+            (r : remaining'') -> do
+                let current' = current <> j
+                sibiling <-
+                    MaybeT $ q (current' <> [opposite r])
+                p <- go (current' <> [r]) remaining''
+                pure $ Branch j r p sibiling

@@ -1,7 +1,10 @@
 cabal-version:   3.4
 name:            csmt-utxo
 version:         0.2.0.0
-synopsis:        An http service exposing docker logs from remote hosts
+synopsis:
+  An http service around a compact sparse merkle tree implementation for UTXO set management
+
+description:     CSMT is a Haskell library implementing a Compact Sparse Mer
 license:         Apache-2.0
 license-file:    LICENSE
 author:          Paolo Veronelli
@@ -81,6 +84,19 @@ executable csmt-utxo
 
   default-language: Haskell2010
 
+library test-lib
+  import:           warnings
+  visibility:       public
+  exposed-modules:  CSMT.Test.Lib
+  build-depends:
+    , base
+    , containers
+    , csmt-utxo
+    , QuickCheck
+
+  hs-source-dirs:   test-lib
+  default-language: Haskell2010
+
 common unit-test-common
   import:             warnings
   default-language:   Haskell2010
@@ -88,14 +104,15 @@ common unit-test-common
   build-depends:
     , base
     , bytestring
-    , containers
     , csmt-utxo
+    , csmt-utxo:test-lib
     , filepath
     , hspec
     , memory
     , QuickCheck
     , temporary
 
+  -- , pretty-simple
   build-tool-depends: hspec-discover:hspec-discover
 
 test-suite unit-test
@@ -105,8 +122,11 @@ test-suite unit-test
   other-modules:
     CSMT.Backend.RocksDB.KeySpec
     CSMT.Backend.RocksDBSpec
+    CSMT.DeletionSpec
     CSMT.HashesSpec
-    CSMTSpec
+    CSMT.InsertionSpec
+    CSMT.InterfaceSpec
+    CSMT.ProofsSpec
 
 executable unit-tests-exe
   import:        unit-test-common
@@ -115,5 +135,8 @@ executable unit-tests-exe
   other-modules:
     CSMT.Backend.RocksDB.KeySpec
     CSMT.Backend.RocksDBSpec
+    CSMT.DeletionSpec
     CSMT.HashesSpec
-    CSMTSpec
+    CSMT.InsertionSpec
+    CSMT.InterfaceSpec
+    CSMT.ProofsSpec

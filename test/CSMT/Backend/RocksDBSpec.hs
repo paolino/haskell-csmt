@@ -16,6 +16,7 @@ import CSMT.Backend.RocksDB
     , rocksDBCSMT
     , withRocksDB
     )
+import CSMT.Deletion (deleting)
 import CSMT.Hashes (Hash, addHash, mkHash)
 import CSMT.Interface
     ( Direction (..)
@@ -50,8 +51,11 @@ tempDB action = withSystemTempDirectory "rocksdb-test"
         let path = dir </> "testdb"
         withRocksDB path action
 
-mkM :: Key -> Hash -> RocksDB ()
-mkM = inserting rocksDBCSMT addHash
+iM :: Key -> Hash -> RocksDB ()
+iM = inserting rocksDBCSMT addHash
+
+dM :: Key -> RocksDB ()
+dM = deleting (rocksDBCSMT @Hash) addHash
 
 pfM
     :: ByteArray a
@@ -78,7 +82,7 @@ testRandomFactsInASparseTree (RunRocksDB run) =
                         let kvs = zip keys $ mkHash . BC.pack . show <$> [1 :: Int ..]
                             (testKey, testValue) = kvs !! m
                         run $ do
-                            traverse_ (uncurry mkM) kvs
+                            traverse_ (uncurry iM) kvs
                         r <- run (vpfM testKey testValue)
                         r `shouldBe` True
 
@@ -96,19 +100,28 @@ spec = around tempDB $ do
     describe "RocksDB CSMT backend" $ do
         it "can initialize and close a db"
             $ \_run -> pure @IO ()
-        it "can store a csmt node and retrieve it"
+        it "can insert a csmt node and retrieve it and delete it"
             $ \(RunRocksDB run) -> run $ do
                 let v = Indirect{jump = [], value = "test value" :: ByteString}
                 change rocksDBCSMT [Insert [] v]
                 r <- rocksDBCSMT `query` []
                 liftIO $ r `shouldBe` Just v
+                change (rocksDBCSMT @ByteString) [Delete []]
+                r2 <- (rocksDBCSMT @ByteString) `query` []
+                liftIO $ r2 `shouldBe` Nothing
+
         it "verifies a fact" $ \(RunRocksDB run) -> run $ do
-            mkM [L] $ mkHash "value1"
+            iM [L] $ mkHash "value1"
             r <- vpfM [L] $ mkHash "value1"
             liftIO $ r `shouldBe` True
         it "rejects an incorrect fact" $ \(RunRocksDB run) -> run $ do
-            mkM [R] $ mkHash "value2"
+            iM [R] $ mkHash "value2"
             r <- vpfM [R] $ mkHash "wrongvalue"
+            liftIO $ r `shouldBe` False
+        it "rejects a deleted fact" $ \(RunRocksDB run) -> run $ do
+            iM [L, R] $ mkHash "value3"
+            dM [L, R]
+            r <- vpfM [L, R] $ mkHash "value3"
             liftIO $ r `shouldBe` False
         it "verifies random facts in a sparse tree"
             $ property . testRandomFactsInASparseTree
