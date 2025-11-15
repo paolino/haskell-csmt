@@ -101,7 +101,7 @@ library test-lib
   hs-source-dirs:   test-lib
   default-language: Haskell2010
 
-common unit-test-common
+test-suite unit-tests
   import:             warnings
   default-language:   Haskell2010
   hs-source-dirs:     test
@@ -117,24 +117,8 @@ common unit-test-common
     , temporary
 
   build-tool-depends: hspec-discover:hspec-discover
-
-test-suite unit-test
-  import:        unit-test-common
-  type:          exitcode-stdio-1.0
-  main-is:       main.hs
-  other-modules:
-    CSMT.Backend.RocksDB.KeySpec
-    CSMT.Backend.RocksDBSpec
-    CSMT.DeletionSpec
-    CSMT.HashesSpec
-    CSMT.InsertionSpec
-    CSMT.InterfaceSpec
-    CSMT.ProofsSpec
-
-executable unit-tests-exe
-  import:        unit-test-common
-  ghc-options:   -O1 -threaded -rtsopts -with-rtsopts=-N
-  main-is:       main-exe.hs
+  type:               exitcode-stdio-1.0
+  main-is:            main.hs
   other-modules:
     CSMT.Backend.RocksDB.KeySpec
     CSMT.Backend.RocksDBSpec
