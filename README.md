@@ -1,5 +1,7 @@
 # CSMT
 
+[![CI](https://github.com/paolino/csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/CI.yaml)
+
 This package provides:
 - A Haskell library implementing a Compact Sparse Merkle Tree (CSMT) data structure with support for persistent storage backends. It offers efficient insertion, deletion, and proof generation functionalities, making it suitable for applications requiring verifiable data structures.
 - A CLI tool for interacting with the CSMT, allowing users to perform operations such as adding and removing elements, generating proofs, and verifying membership within the tree.
