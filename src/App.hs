@@ -23,6 +23,18 @@ import Data.ByteArray.Encoding
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Char8 qualified as BC
+import OptEnvConf
+    ( Parser
+    , argument
+    , help
+    , long
+    , metavar
+    , reader
+    , runParser
+    , setting
+    , str
+    )
+import Paths_csmt (version)
 import System.Console.Haskeline
     ( defaultSettings
     , getInputLine
@@ -96,13 +108,32 @@ core isPiped (RunRocksDB run) l' = case parseCommand $ BC.pack l' of
                 r <- run $ verifyInclusionProof rocksDBCSMT value decoded
                 putStrLn $ if r then "Valid proof" else "Invalid proof"
             Nothing -> putStrLn "Invalid proof format"
-    Nothing -> putStrLn help
+    Nothing -> putStrLn helpInteractive
+
+newtype Options = Options
+    { optDbPath :: FilePath
+    }
+
+parseDbPath :: Parser FilePath
+parseDbPath =
+    setting
+        [ argument
+        , metavar "DB_PATH"
+        , help "Path to RocksDB database"
+        , reader str
+        ]
+
+optionsParser :: Parser Options
+optionsParser =
+    Options
+        <$> parseDbPath
 
 main :: IO ()
 main = do
+    Options{optDbPath} <- runParser version "csmt" optionsParser
     hSetBuffering stdout LineBuffering
     hSetBuffering stdin LineBuffering
-    withRocksDB "testdb" $ \run -> do
+    withRocksDB optDbPath $ \run -> do
         isPiped <- checkPipeline
         if isPiped
             then fix $ \loop -> do
@@ -112,7 +143,7 @@ main = do
                     core isPiped run (BC.unpack line)
                     loop
             else do
-                putStrLn help
+                putStrLn helpInteractive
                 runInputT defaultSettings $ fix $ \loop -> do
                     mlline <- getInputLine "\n> "
                     case mlline of
@@ -124,8 +155,8 @@ main = do
 checkPipeline :: IO Bool
 checkPipeline = not <$> hIsTerminalDevice stdin
 
-help :: String
-help =
+helpInteractive :: String
+helpInteractive =
     unlines
         [ "Commands:"
         , "  i <key> <value>   Change key-value pair and print inclusion proof"
