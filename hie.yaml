@@ -7,10 +7,13 @@ cradle:
       component: "csmt:exe:csmt"
 
     - path: "test"
-      component: "csmt:test:unit-test"
+      component: "csmt:test:unit-tests"
 
     - path: "test-lib"
       component: "csmt:lib:test-lib"
+
+    - path: "bench"
+      component: "csmt:bench:bench"
 
     - path: "CI/rewrite-libs/src/rewrite-libs.hs"
       component: "rewrite-libs:exe:rewrite-libs"

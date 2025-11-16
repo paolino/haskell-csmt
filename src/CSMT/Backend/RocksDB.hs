@@ -5,6 +5,7 @@ module CSMT.Backend.RocksDB
     , withRocksDB
     , RocksDB
     , RunRocksDB (..)
+    , unsafeWithRocksDB
     )
 where
 
@@ -17,6 +18,9 @@ import CSMT.Interface
     )
 
 import CSMT.Backend.RocksDB.Key
+import Control.Concurrent (newEmptyMVar, putMVar, readMVar)
+import Control.Concurrent.Async (async, link)
+import Control.Monad ((<=<))
 import Control.Monad.Trans.Class (MonadTrans (..))
 import Control.Monad.Trans.Reader (ReaderT (..), ask)
 import Data.ByteArray (ByteArray)
@@ -71,6 +75,20 @@ withRocksDB :: FilePath -> (RunRocksDB -> IO b) -> IO b
 withRocksDB path action = do
     withDB path config $ \db -> do
         action $ RunRocksDB $ flip runReaderT db
+
+unsafeWithRocksDB :: FilePath -> IO (RunRocksDB, IO ())
+unsafeWithRocksDB path = do
+    wait <- newEmptyMVar
+    dbv <- newEmptyMVar
+    done <- newEmptyMVar
+    link <=< async $ do
+        withDB path config $ \db -> do
+            putMVar dbv (RunRocksDB $ flip runReaderT db)
+            readMVar wait
+        putMVar done ()
+    rdb <- readMVar dbv
+    let close = putMVar wait ()
+    pure (rdb, close >> readMVar done)
 
 config :: Config
 config =

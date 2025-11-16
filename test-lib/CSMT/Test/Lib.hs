@@ -52,9 +52,9 @@ import Data.Map qualified as Map
 import Data.Map.Strict (Map)
 import Data.String (IsString (..))
 import Test.QuickCheck
-    ( listOf1
+    ( listOf
+    , listOf1
     , shuffle
-    , listOf
     )
 import Test.QuickCheck.Gen (Gen, elements)
 

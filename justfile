@@ -7,7 +7,7 @@ format:
     #!/usr/bin/env bash
     # shellcheck disable=SC2034
     for i in {1..3}; do
-        fourmolu -i src app test CI/rewrite-libs
+        fourmolu -i src app test test-lib bench CI/rewrite-libs
     done
     cabal-fmt -i csmt.cabal CI/rewrite-libs/rewrite-libs.cabal
     nixfmt ./*.nix
