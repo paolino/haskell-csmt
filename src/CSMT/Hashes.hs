@@ -12,6 +12,7 @@ module CSMT.Hashes
     , verifyInclusionProof
     , renderProof
     , parseProof
+    , delete
     )
 where
 
@@ -46,6 +47,9 @@ parseHash bs
 
 insert :: Monad m => CSMT m Hash -> ByteString -> ByteString -> m ()
 insert csmt k v = inserting csmt addHash (byteStringToKey k) (mkHash v)
+
+delete :: Monad m => CSMT m Hash -> ByteString -> m ()
+delete csmt k = inserting csmt addHash (byteStringToKey k) mempty
 
 byteStringToKey :: ByteString -> Key
 byteStringToKey bs = concatMap byteToDirections (B.unpack $ renderHash $ mkHash bs)

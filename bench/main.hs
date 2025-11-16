@@ -1,5 +1,5 @@
 import CSMT.Backend.RocksDB
-import CSMT.Hashes (Hash, insertKV)
+import CSMT.Hashes (Hash, insert)
 import Control.DeepSeq (NFData (..))
 import Control.Exception (SomeException, catch)
 import Control.Monad (forM_)
@@ -31,7 +31,7 @@ envCSMT path n = do
             forM_ [1 .. n] $ \i -> do
                 let k = fromString $ show i
                     v = "value"
-                insertKV csmt k v
+                insert csmt k v
     r `catch` \e -> do
         kill
         error
@@ -45,7 +45,7 @@ insertMany (WithRocksDb (RunRocksDB run) kill) m = do
             forM_ [1 .. m] $ \i -> do
                 let k = fromString $ show (10000000 + i)
                     v = "value"
-                insertKV csmt k v
+                insert csmt k v
     r `catch` \e -> do
         kill
         error
