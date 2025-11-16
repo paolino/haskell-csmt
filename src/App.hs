@@ -6,8 +6,8 @@ import CSMT.Backend.RocksDB
     , withRocksDB
     )
 import CSMT.Hashes
-    ( inclusionProof
-    , insertKV
+    ( generateInclusionProof
+    , insert
     , root
     , verifyInclusionProof
     )
@@ -64,15 +64,15 @@ core :: Bool -> RunRocksDB -> String -> IO ()
 core isPiped (RunRocksDB run) l' = case parseCommand $ BC.pack l' of
     Just (I k v) -> do
         r <- run $ do
-            insertKV rocksDBCSMT k v
-            inclusionProof rocksDBCSMT k
+            insert rocksDBCSMT k v
+            generateInclusionProof rocksDBCSMT k
         case r of
             Just "" -> putStrLn "Empty proof for the first insertion"
             Just proof -> do
                 if isPiped then pure () else printHash "proof" proof
             Nothing -> putStrLn "Tree is empty"
     Just (Q k) -> do
-        r <- run $ inclusionProof rocksDBCSMT k
+        r <- run $ generateInclusionProof rocksDBCSMT k
         case r of
             Just proof -> printHash "proof" proof
             Nothing -> putStrLn "No proof found"

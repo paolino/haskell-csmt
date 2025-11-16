@@ -6,9 +6,9 @@ module CSMT.Hashes
     , Hash (..)
     , renderHash
     , parseHash
-    , insertKV
+    , insert
     , root
-    , inclusionProof
+    , generateInclusionProof
     , verifyInclusionProof
     , renderProof
     , parseProof
@@ -26,17 +26,13 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
 import Data.Word (Word8)
 
--- | A simple wrapper around Keccak-256 hashes, with a combining function.
 newtype Hash = Hash ByteString
     deriving
         (Eq, Ord, Show, Semigroup, Monoid, ByteArrayAccess, ByteArray)
 
--- | Create a Keccak-256 hash from a ByteString.
 mkHash :: ByteString -> Hash
 mkHash = convert . hash @ByteString @Blake2b_256
 
--- | Combine two hashes by concatenating their ByteString representations
---   and hashing the result.
 addHash :: Hash -> Hash -> Hash
 addHash (Hash h1) (Hash h2) = mkHash (h1 <> h2)
 
@@ -48,8 +44,8 @@ parseHash bs
     | B.length bs == 32 = Just (Hash bs)
     | otherwise = Nothing
 
-insertKV :: Monad m => CSMT m Hash -> ByteString -> ByteString -> m ()
-insertKV csmt k v = inserting csmt addHash (byteStringToKey k) (mkHash v)
+insert :: Monad m => CSMT m Hash -> ByteString -> ByteString -> m ()
+insert csmt k v = inserting csmt addHash (byteStringToKey k) (mkHash v)
 
 byteStringToKey :: ByteString -> Key
 byteStringToKey bs = concatMap byteToDirections (B.unpack $ renderHash $ mkHash bs)
@@ -90,9 +86,9 @@ parseProof = go
             steps <- go rest'
             Just ((dir, h) : steps)
 
-inclusionProof
+generateInclusionProof
     :: Monad m => CSMT m Hash -> ByteString -> m (Maybe ByteString)
-inclusionProof csmt k = do
+generateInclusionProof csmt k = do
     mp <- Proof.mkInclusionProof csmt (byteStringToKey k)
     pure $ fmap renderProof mp
 
