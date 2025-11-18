@@ -18,6 +18,7 @@ let
       pkgs.gitAndTools.git
       pkgs.just
       pkgs.nixfmt-classic
+      pkgs.shellcheck
 
     ];
     shellHook = ''
