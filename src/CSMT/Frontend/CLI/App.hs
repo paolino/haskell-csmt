@@ -27,7 +27,6 @@ import OptEnvConf
     ( Parser
     , argument
     , help
-    , long
     , metavar
     , reader
     , runParser
