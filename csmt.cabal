@@ -63,6 +63,7 @@ library
     CSMT.Insertion
     CSMT.Interface
     CSMT.Proofs
+    Data.Serialize.Extra
 
   build-depends:
     , async
