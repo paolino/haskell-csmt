@@ -11,6 +11,7 @@ import CSMT.Hashes
     , generateInclusionProof
     , insert
     , mkHash
+    , queryKV
     , root
     , verifyInclusionProof
     )
@@ -52,11 +53,18 @@ import System.IO
     )
 
 data Command
-    = I ByteString ByteString
-    | D ByteString
-    | Q ByteString
-    | V ByteString ByteString
-    | R
+    = -- | Insert key value
+      I ByteString ByteString
+    | -- | Delete key
+      D ByteString
+    | -- | Query inclusion proof for key
+      Q ByteString
+    | -- | Verify inclusion proof for value and proof
+      V ByteString ByteString
+    | -- | Query key-value pair
+      W ByteString
+    | -- | Query root hash
+      R
 
 parseCommand :: ByteString -> Maybe Command
 parseCommand line =
@@ -64,6 +72,7 @@ parseCommand line =
         ["i", k, v] -> Just (I k v)
         ["d", k] -> Just (D k)
         ["q", k] -> Just (Q k)
+        ["w", k] -> Just (W k)
         ["v", value] -> Just (V value "")
         ["v", value, proof] -> Just (V value proof)
         ["r"] -> Just R
@@ -113,6 +122,11 @@ core isPiped (RunRocksDB run) l' = case parseCommand $ BC.pack l' of
                 r <- run $ verifyInclusionProof rocksDBBackend value decoded
                 putStrLn $ if r then "Valid proof" else "Invalid proof"
             Nothing -> putStrLn "Invalid proof format"
+    Just (W k) -> do
+        mv <- run $ queryKV rocksDBBackend k
+        case mv of
+            Just v -> BC.putStrLn v
+            Nothing -> putStrLn "Key not found"
     Nothing -> putStrLn helpInteractive
 
 newtype Options = Options
@@ -165,6 +179,7 @@ helpInteractive =
     unlines
         [ "Commands:"
         , "  i <key> <value>   Change key-value pair and print inclusion proof"
+        , "  w <key>           Query value for key"
         , "  d <key>           DeleteCSMT key and print exclusion proof (soon)"
         , "  q <key>           QueryCSMT inclusion proof for key"
         , "  v <value>         Verify inclusion proof for the singleton csmt"
