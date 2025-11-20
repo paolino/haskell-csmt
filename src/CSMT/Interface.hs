@@ -14,7 +14,7 @@ module CSMT.Interface
     , Op (..)
     , Change
     , QueryCSMT
-    , CSMT (..)
+    , Backend (..)
     , fromBool
     , toBool
     , root
@@ -92,7 +92,7 @@ type QueryCSMT m a = Key -> m (Maybe (Indirect a))
 type QueryKV m k v = k -> m (Maybe v)
 
 -- | The backend interface for a CSMT in some monad m.
-data CSMT m k v a = CSMT
+data Backend m k v a = Backend
     { change :: Change m k v a
     , queryCSMT :: QueryCSMT m a
     , queryKV :: QueryKV m k v
@@ -109,7 +109,7 @@ compareKeys (x : xs) (y : ys)
         in  (x : j, o, r)
     | otherwise = ([], x : xs, y : ys)
 
-root :: Monad m => Hashing a -> CSMT m k v a -> m (Maybe a)
+root :: Monad m => Hashing a -> Backend m k v a -> m (Maybe a)
 root hsh csmt = do
     mi <- queryCSMT csmt []
     pure $ case mi of

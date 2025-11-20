@@ -9,7 +9,7 @@ import CSMT
     , InMemoryDB (inMemoryCSMT)
     , Op (..)
     , emptyInMemoryDB
-    , pureCSMT
+    , pureBackend
     , queryCSMT
     , runPure
     )
@@ -38,7 +38,7 @@ spec = do
         it "constructs a deletion path for a singleton tree"
             $ let
                 rs0 = insertInt emptyInMemoryDB [] (1 :: Int)
-                (mp, _) = runPure rs0 $ newDeletionPath (queryCSMT pureCSMT) []
+                (mp, _) = runPure rs0 $ newDeletionPath (queryCSMT pureBackend) []
               in
                 mp `shouldBe` Just (Value [] 1)
         it "constructs a deletion path for a tree with siblings"

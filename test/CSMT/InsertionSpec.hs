@@ -9,7 +9,7 @@ import CSMT
     , emptyInMemoryDB
     , inMemoryCSMT
     , mkCompose
-    , pureCSMT
+    , pureBackend
     , queryCSMT
     , runPure
     )
@@ -101,7 +101,7 @@ spec = do
                 _d12 =
                     runPure rs1
                         $ mkCompose
-                            (queryCSMT pureCSMT)
+                            (queryCSMT pureBackend)
                             [L, L]
                             3
                 rs2 = seq rs1 $ insertInt rs1 [L, L] (3 :: Int)

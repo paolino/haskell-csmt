@@ -7,7 +7,7 @@ module CSMT.Deletion
 where
 
 import CSMT.Interface
-    ( CSMT (..)
+    ( Backend (..)
     , Direction (..)
     , Hashing (..)
     , Indirect (..)
@@ -28,7 +28,7 @@ data DeletionPath a where
     deriving (Show, Eq)
 
 deleting
-    :: Monad m => CSMT m k v a -> Hashing a -> Key -> m ()
+    :: Monad m => Backend m k v a -> Hashing a -> Key -> m ()
 deleting csmt hashing key = do
     mpath <- newDeletionPath (queryCSMT csmt) key
     case mpath of

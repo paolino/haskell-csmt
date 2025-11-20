@@ -9,7 +9,7 @@ module CSMT.Insertion
 where
 
 import CSMT.Interface
-    ( CSMT (..)
+    ( Backend (..)
     , Direction (..)
     , Hashing (..)
     , Indirect (..)
@@ -34,7 +34,7 @@ compose R j left right = Compose j right left
 -- | Change a value into a CSMT
 inserting
     :: Monad m
-    => CSMT m k v a
+    => Backend m k v a
     -- ^ Backend interface of the CSMT
     -> Hashing a
     -> Key
@@ -42,7 +42,7 @@ inserting
     -> a
     -- ^ Hash to insert
     -> m ()
-inserting (CSMT i q _) hashing key value = do
+inserting (Backend i q _) hashing key value = do
     c <- mkCompose q key value
     i $ snd $ scanCompose hashing c
 

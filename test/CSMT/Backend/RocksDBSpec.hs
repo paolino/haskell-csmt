@@ -13,7 +13,7 @@ import CSMT
 import CSMT.Backend.RocksDB
     ( RocksDB
     , RunRocksDB (..)
-    , rocksDBCSMT
+    , rocksDBBackend
     , withRocksDB
     )
 import CSMT.Deletion (deleting)
@@ -52,23 +52,23 @@ tempDB action = withSystemTempDirectory "rocksdb-test"
         withRocksDB path action
 
 iM :: Key -> Hash -> RocksDB ()
-iM = inserting rocksDBCSMT hashHashing
+iM = inserting rocksDBBackend hashHashing
 
 dM :: Key -> RocksDB ()
-dM = deleting (rocksDBCSMT @Hash) hashHashing
+dM = deleting (rocksDBBackend @Hash) hashHashing
 
 pfM
     :: ByteArray a
     => Key
     -> RocksDB (Maybe (Proof a))
-pfM = mkInclusionProof rocksDBCSMT
+pfM = mkInclusionProof rocksDBBackend
 
 vpfM :: Key -> Hash -> RocksDB Bool
 vpfM k v = do
     mp <- pfM k
     case mp of
         Nothing -> pure False
-        Just p -> verifyInclusionProof rocksDBCSMT hashHashing v p
+        Just p -> verifyInclusionProof rocksDBBackend hashHashing v p
 
 testRandomFactsInASparseTree
     :: RunRocksDB
@@ -107,11 +107,11 @@ spec = around tempDB $ do
                             { jump = []
                             , value = "test value" :: ByteString
                             }
-                change rocksDBCSMT [InsertCSMT [] v]
-                r <- rocksDBCSMT `queryCSMT` []
+                change rocksDBBackend [InsertCSMT [] v]
+                r <- rocksDBBackend `queryCSMT` []
                 liftIO $ r `shouldBe` Just v
-                change (rocksDBCSMT @ByteString) [DeleteCSMT []]
-                r2 <- (rocksDBCSMT @ByteString) `queryCSMT` []
+                change (rocksDBBackend @ByteString) [DeleteCSMT []]
+                r2 <- (rocksDBBackend @ByteString) `queryCSMT` []
                 liftIO $ r2 `shouldBe` Nothing
 
         it "verifies a fact" $ \(RunRocksDB run) -> run $ do

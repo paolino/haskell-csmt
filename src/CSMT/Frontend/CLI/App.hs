@@ -2,7 +2,7 @@ module CSMT.Frontend.CLI.App (main) where
 
 import CSMT.Backend.RocksDB
     ( RunRocksDB (RunRocksDB)
-    , rocksDBCSMT
+    , rocksDBBackend
     , withRocksDB
     )
 import CSMT.Hashes
@@ -77,34 +77,34 @@ readHash bs = case convertFromBase Base64 bs of
 core :: Bool -> RunRocksDB -> String -> IO ()
 core isPiped (RunRocksDB run) l' = case parseCommand $ BC.pack l' of
     Just (I k v) -> do
-        run $ insert rocksDBCSMT k v
+        run $ insert rocksDBBackend k v
         unless isPiped
             $ do
-                r <- run $ generateInclusionProof rocksDBCSMT k
+                r <- run $ generateInclusionProof rocksDBBackend k
                 case r of
                     Just "" -> putStrLn "Empty proof for the first insertion"
                     Just proof -> do
                         printHash "proof" proof
                     Nothing -> putStrLn "Tree is empty"
     Just (D k) -> do
-        run $ delete rocksDBCSMT k
+        run $ delete rocksDBBackend k
         unless isPiped
             $ putStrLn "Deleted key, exclusion proof generation not implemented"
     -- Deletion is not implemented in this example
     Just (Q k) -> do
-        r <- run $ generateInclusionProof rocksDBCSMT k
+        r <- run $ generateInclusionProof rocksDBBackend k
         case r of
             Just proof -> printHash "proof" proof
             Nothing -> putStrLn "No proof found"
     Just R -> do
-        r <- run $ root rocksDBCSMT
+        r <- run $ root rocksDBBackend
         case r of
             Just rootHash -> printHash "root" rootHash
             Nothing -> putStrLn "Tree is empty"
     Just (V value proof) -> do
         case readHash proof of
             Just decoded -> do
-                r <- run $ verifyInclusionProof rocksDBCSMT value decoded
+                r <- run $ verifyInclusionProof rocksDBBackend value decoded
                 putStrLn $ if r then "Valid proof" else "Invalid proof"
             Nothing -> putStrLn "Invalid proof format"
     Nothing -> putStrLn helpInteractive

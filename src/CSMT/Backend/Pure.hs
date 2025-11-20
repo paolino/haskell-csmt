@@ -4,13 +4,13 @@ module CSMT.Backend.Pure
     ( InMemoryDB (..)
     , Pure
     , runPure
-    , pureCSMT
+    , pureBackend
     , emptyInMemoryDB
     )
 where
 
 import CSMT.Interface
-    ( CSMT (..)
+    ( Backend (..)
     , Indirect
     , Key
     , Op (..)
@@ -60,9 +60,9 @@ pureChange m (DeleteCSMT k) = onCSMT m $ Map.delete k
 pureChange m (InsertKV k v) = onKV m (Map.insert k v)
 pureChange m (DeleteKV k) = onKV m (Map.delete k)
 
-pureCSMT :: Ord k => CSMT (Pure k v a) k v a
-pureCSMT =
-    CSMT
+pureBackend :: Ord k => Backend (Pure k v a) k v a
+pureBackend =
+    Backend
         { change = \kvs -> modify' $ \m -> foldl' pureChange m kvs
         , queryCSMT = \k -> gets $ Map.lookup k . inMemoryCSMT
         , queryKV = \k -> gets $ Map.lookup k . inMemoryKV

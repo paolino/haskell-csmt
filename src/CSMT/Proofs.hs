@@ -10,7 +10,7 @@ module CSMT.Proofs
 where
 
 import CSMT.Interface
-    ( CSMT (CSMT, queryCSMT)
+    ( Backend (Backend, queryCSMT)
     , Direction (..)
     , Hashing (..)
     , Indirect (..)
@@ -40,10 +40,10 @@ data Proof a = Proof
 -- | Collect a proof for the presence of a key in the CSMT
 mkInclusionProof
     :: Monad m
-    => CSMT m k v a
+    => Backend m k v a
     -> Key
     -> m (Maybe (Proof a))
-mkInclusionProof CSMT{queryCSMT} key = runMaybeT $ do
+mkInclusionProof Backend{queryCSMT} key = runMaybeT $ do
     Indirect jump _ <- MaybeT $ queryCSMT []
     guard $ isPrefixOf jump key
     rs <- go jump $ drop (length jump) key
@@ -81,7 +81,7 @@ foldProof hashing value Proof{proofSteps, proofRootJump} =
 -- | Verify a proof of given the included value
 verifyInclusionProof
     :: (Eq a, Monad m)
-    => CSMT m k v a
+    => Backend m k v a
     -> Hashing a
     -> a
     -> Proof a

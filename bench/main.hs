@@ -27,7 +27,7 @@ envCSMT path n = do
     let dbPath = path </> "rocksdb"
     (RunRocksDB run, kill) <- unsafeWithRocksDB dbPath
     let r = run $ do
-            let csmt = rocksDBCSMT @Hash
+            let csmt = rocksDBBackend @Hash
             forM_ [1 .. n] $ \i -> do
                 let k = fromString $ show i
                     v = "value"
@@ -41,7 +41,7 @@ envCSMT path n = do
 insertMany :: WithRocksDb -> Int -> IO ()
 insertMany (WithRocksDb (RunRocksDB run) kill) m = do
     let r = run $ do
-            let csmt = rocksDBCSMT @Hash
+            let csmt = rocksDBBackend @Hash
             forM_ [1 .. m] $ \i -> do
                 let k = fromString $ show (10000000 + i)
                     v = "value"

@@ -41,7 +41,7 @@ import CSMT
     , emptyInMemoryDB
     , inserting
     , mkInclusionProof
-    , pureCSMT
+    , pureBackend
     , queryCSMT
     , runPure
     , verifyInclusionProof
@@ -92,10 +92,10 @@ insertInt
 insertInt = insert intHashing
 
 insertM :: Ord k => Hashing a -> Key -> a -> Pure k v a ()
-insertM = inserting pureCSMT
+insertM = inserting pureBackend
 
 deleteM :: Ord k => Hashing a -> Key -> Pure k v a ()
-deleteM = deleting pureCSMT
+deleteM = deleting pureBackend
 
 insertMInt :: Key -> Int -> Pure Int Int Int ()
 insertMInt = insertM intHashing
@@ -116,14 +116,14 @@ deleteMInt :: Ord k => Key -> Pure k v Int ()
 deleteMInt = deleteM intHashing
 
 proofM :: Ord k => Key -> Pure k v a (Maybe (Proof a))
-proofM = mkInclusionProof pureCSMT
+proofM = mkInclusionProof pureBackend
 
 verifyM :: (Eq a, Ord k) => Hashing a -> Key -> a -> Pure k v a Bool
 verifyM hashing k v = do
     mp <- proofM k
     case mp of
         Nothing -> pure False
-        Just p -> verifyInclusionProof pureCSMT hashing v p
+        Just p -> verifyInclusionProof pureBackend hashing v p
 
 verifyMInt :: Ord k => Key -> Int -> Pure k v Int Bool
 verifyMInt = verifyM intHashing
@@ -183,7 +183,7 @@ genSomePaths n = fmap nub <$> listOf1 $ do
 
 mkDeletionPath
     :: Ord k => InMemoryDB k v a -> Key -> Maybe (DeletionPath a)
-mkDeletionPath s = fst . runPure s . newDeletionPath (queryCSMT pureCSMT)
+mkDeletionPath s = fst . runPure s . newDeletionPath (queryCSMT pureBackend)
 
 -- showState :: Show a => Pure k v a ()
 -- showState = do

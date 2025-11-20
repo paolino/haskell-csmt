@@ -1,7 +1,7 @@
 {-# LANGUAGE StrictData #-}
 
 module CSMT.Backend.RocksDB
-    ( rocksDBCSMT
+    ( rocksDBBackend
     , withRocksDB
     , RocksDB
     , RunRocksDB (..)
@@ -12,7 +12,7 @@ module CSMT.Backend.RocksDB
 where
 
 import CSMT.Interface
-    ( CSMT (..)
+    ( Backend (..)
     , Change
     , Indirect
     , Key
@@ -76,9 +76,9 @@ rocksDBChange kvs = do
         InsertKV _ _ -> []
         DeleteKV _ -> []
 
-rocksDBCSMT :: ByteArray a => CSMT RocksDB k v a
-rocksDBCSMT =
-    CSMT
+rocksDBBackend :: ByteArray a => Backend RocksDB k v a
+rocksDBBackend =
+    Backend
         { change = rocksDBChange
         , queryCSMT = rocksDBQuery
         , queryKV = \_ -> pure Nothing
