@@ -13,7 +13,7 @@ import CSMT.Interface
     , Indirect (..)
     , Key
     , Op (..)
-    , Query
+    , QueryCSMT
     , addWithDirection
     , compareKeys
     , opposite
@@ -30,7 +30,7 @@ data DeletionPath a where
 deleting
     :: Monad m => CSMT m k v a -> Hashing a -> Key -> m ()
 deleting csmt hashing key = do
-    mpath <- newDeletionPath (query csmt) key
+    mpath <- newDeletionPath (queryCSMT csmt) key
     case mpath of
         Nothing -> pure ()
         Just path -> change csmt $ deletionPathToOps hashing path
@@ -71,7 +71,7 @@ deletionPathToOps hashing = snd . go []
 newDeletionPath
     :: forall m a
      . Monad m
-    => Query m a
+    => QueryCSMT m a
     -> Key
     -> m (Maybe (DeletionPath a))
 newDeletionPath q = runMaybeT . go []

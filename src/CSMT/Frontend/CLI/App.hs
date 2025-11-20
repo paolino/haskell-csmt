@@ -160,7 +160,7 @@ helpInteractive =
         [ "Commands:"
         , "  i <key> <value>   Change key-value pair and print inclusion proof"
         , "  d <key>           DeleteCSMT key and print exclusion proof (soon)"
-        , "  q <key>           Query inclusion proof for key"
+        , "  q <key>           QueryCSMT inclusion proof for key"
         , "  v <value>         Verify inclusion proof for the singleton csmt"
         , "  v <value> <proof> Verify inclusion proof for a value"
         , "  r                 Print root hash of the tree"

@@ -10,7 +10,7 @@ module CSMT.Proofs
 where
 
 import CSMT.Interface
-    ( CSMT (CSMT, query)
+    ( CSMT (CSMT, queryCSMT)
     , Direction (..)
     , Hashing (..)
     , Indirect (..)
@@ -43,17 +43,17 @@ mkInclusionProof
     => CSMT m k v a
     -> Key
     -> m (Maybe (Proof a))
-mkInclusionProof CSMT{query} key = runMaybeT $ do
-    Indirect jump _ <- MaybeT $ query []
+mkInclusionProof CSMT{queryCSMT} key = runMaybeT $ do
+    Indirect jump _ <- MaybeT $ queryCSMT []
     guard $ isPrefixOf jump key
     rs <- go jump $ drop (length jump) key
     pure $ Proof{proofSteps = reverse rs, proofRootJump = jump}
   where
     go _ [] = pure []
     go u (k : ks) = do
-        Indirect jump _ <- MaybeT $ query (u <> [k])
+        Indirect jump _ <- MaybeT $ queryCSMT (u <> [k])
         guard $ isPrefixOf jump ks
-        stepSibiling <- MaybeT $ query (u <> [opposite k])
+        stepSibiling <- MaybeT $ queryCSMT (u <> [opposite k])
         let step =
                 ProofStep
                     { stepDirection = k
@@ -87,7 +87,7 @@ verifyInclusionProof
     -> Proof a
     -> m Bool
 verifyInclusionProof csmt hashing value proof = do
-    mv <- query csmt []
+    mv <- queryCSMT csmt []
     pure $ case mv of
         Just rootValue ->
             rootHash hashing rootValue == foldProof hashing value proof

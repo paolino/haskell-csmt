@@ -17,7 +17,7 @@ import CSMT.Interface
     , Indirect
     , Key
     , Op (..)
-    , Query
+    , QueryCSMT
     , getIndirect
     , putIndirect
     , putKey
@@ -51,7 +51,7 @@ indirectToRocksValue = evalPutM . putIndirect
 mkKey :: Key -> ByteString
 mkKey = evalPutM . putKey
 
-rocksDBQuery :: ByteArray a => Query RocksDB a
+rocksDBQuery :: ByteArray a => QueryCSMT RocksDB a
 rocksDBQuery k = do
     let rdbk = mkKey k
     db <- ask
@@ -80,7 +80,7 @@ rocksDBCSMT :: ByteArray a => CSMT RocksDB k v a
 rocksDBCSMT =
     CSMT
         { change = rocksDBChange
-        , query = rocksDBQuery
+        , queryCSMT = rocksDBQuery
         }
 
 newtype RunRocksDB = RunRocksDB (forall a. RocksDB a -> IO a)

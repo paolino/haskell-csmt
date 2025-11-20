@@ -23,7 +23,7 @@ import CSMT.Interface
     , Indirect (..)
     , Op (..)
     , change
-    , query
+    , queryCSMT
     )
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO (..))
@@ -108,10 +108,10 @@ spec = around tempDB $ do
                             , value = "test value" :: ByteString
                             }
                 change rocksDBCSMT [InsertCSMT [] v]
-                r <- rocksDBCSMT `query` []
+                r <- rocksDBCSMT `queryCSMT` []
                 liftIO $ r `shouldBe` Just v
                 change (rocksDBCSMT @ByteString) [DeleteCSMT []]
-                r2 <- (rocksDBCSMT @ByteString) `query` []
+                r2 <- (rocksDBCSMT @ByteString) `queryCSMT` []
                 liftIO $ r2 `shouldBe` Nothing
 
         it "verifies a fact" $ \(RunRocksDB run) -> run $ do

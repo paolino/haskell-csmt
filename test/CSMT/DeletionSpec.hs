@@ -8,7 +8,7 @@ import CSMT
     ( Direction (L, R)
     , Op (..)
     , pureCSMT
-    , query
+    , queryCSMT
     , runPure
     )
 import CSMT.Deletion
@@ -35,7 +35,7 @@ spec = do
         it "constructs a deletion path for a singleton tree"
             $ let
                 rs0 = insertInt [] [] (1 :: Int)
-                (mp, _) = runPure rs0 $ newDeletionPath (query pureCSMT) []
+                (mp, _) = runPure rs0 $ newDeletionPath (queryCSMT pureCSMT) []
               in
                 mp `shouldBe` Just (Value [] 1)
         it "constructs a deletion path for a tree with siblings"

@@ -41,7 +41,7 @@ import CSMT
     , inserting
     , mkInclusionProof
     , pureCSMT
-    , query
+    , queryCSMT
     , runPure
     , verifyInclusionProof
     )
@@ -83,6 +83,7 @@ delete hashing m k = snd $ runPure m $ deleteM hashing k
 
 deleteInt :: InMemoryDB Int -> Key -> InMemoryDB Int
 deleteInt = delete intHashing
+
 insertInt :: InMemoryDB Int -> Key -> Int -> InMemoryDB Int
 insertInt = insert intHashing
 
@@ -199,7 +200,7 @@ genSomePaths n = fmap nub <$> listOf1 $ do
     go n
 
 mkDeletionPath :: InMemoryDB a -> Key -> Maybe (DeletionPath a)
-mkDeletionPath s = fst . runPure s . newDeletionPath (query pureCSMT)
+mkDeletionPath s = fst . runPure s . newDeletionPath (queryCSMT pureCSMT)
 
 -- showState :: Show a => Pure a ()
 -- showState = do

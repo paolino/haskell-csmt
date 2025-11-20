@@ -15,7 +15,7 @@ import CSMT.Interface
     , Indirect (..)
     , Key
     , Op (..)
-    , Query
+    , QueryCSMT
     , compareKeys
     , opposite
     )
@@ -64,7 +64,7 @@ scanCompose Hashing{combineHash} = go []
 mkCompose
     :: forall a m
      . Monad m
-    => Query m a
+    => QueryCSMT m a
     -> Key
     -> a
     -> m (Compose a)

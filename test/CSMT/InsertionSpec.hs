@@ -7,7 +7,7 @@ import CSMT
     ( Direction (L, R)
     , mkCompose
     , pureCSMT
-    , query
+    , queryCSMT
     , runPure
     )
 import CSMT.Test.Lib
@@ -98,7 +98,7 @@ spec = do
                 _d12 =
                     runPure rs1
                         $ mkCompose
-                            (query pureCSMT)
+                            (queryCSMT pureCSMT)
                             [L, L]
                             3
                 rs2 = seq rs1 $ insertInt rs1 [L, L] (3 :: Int)

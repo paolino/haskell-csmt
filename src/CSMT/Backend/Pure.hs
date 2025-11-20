@@ -43,5 +43,5 @@ pureCSMT :: CSMT (Pure a) k v a
 pureCSMT =
     CSMT
         { change = \kvs -> modify' $ \m -> foldl' pureChange m kvs
-        , query = gets . Map.lookup
+        , queryCSMT = gets . Map.lookup
         }

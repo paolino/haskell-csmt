@@ -13,7 +13,7 @@ module CSMT.Interface
     , Hashing (..)
     , Op (..)
     , Change
-    , Query
+    , QueryCSMT
     , CSMT (..)
     , fromBool
     , toBool
@@ -86,13 +86,13 @@ data Op k v a
 -- | Type alias for a change function in some monad m. It support batch inserts.
 type Change m k v a = [Op k v a] -> m ()
 
--- | Type alias for a query function in some monad m.
-type Query m a = Key -> m (Maybe (Indirect a))
+-- | Type alias for a queryCSMT function in some monad m.
+type QueryCSMT m a = Key -> m (Maybe (Indirect a))
 
 -- | The backend interface for a CSMT in some monad m.
 data CSMT m k v a = CSMT
     { change :: Change m k v a
-    , query :: Query m a
+    , queryCSMT :: QueryCSMT m a
     }
 
 -- | Compare two keys and return their common prefix and the remaining suffixes
@@ -108,7 +108,7 @@ compareKeys (x : xs) (y : ys)
 
 root :: Monad m => Hashing a -> CSMT m k v a -> m (Maybe a)
 root hsh csmt = do
-    mi <- query csmt []
+    mi <- queryCSMT csmt []
     pure $ case mi of
         Nothing -> Nothing
         Just i -> Just $ rootHash hsh i
