@@ -40,7 +40,7 @@ data Proof a = Proof
 -- | Collect a proof for the presence of a key in the CSMT
 mkInclusionProof
     :: Monad m
-    => CSMT m a
+    => CSMT m k v a
     -> Key
     -> m (Maybe (Proof a))
 mkInclusionProof CSMT{query} key = runMaybeT $ do
@@ -81,7 +81,7 @@ foldProof hashing value Proof{proofSteps, proofRootJump} =
 -- | Verify a proof of given the included value
 verifyInclusionProof
     :: (Eq a, Monad m)
-    => CSMT m a
+    => CSMT m k v a
     -> Hashing a
     -> a
     -> Proof a

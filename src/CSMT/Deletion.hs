@@ -28,7 +28,7 @@ data DeletionPath a where
     deriving (Show, Eq)
 
 deleting
-    :: Monad m => CSMT m a -> Hashing a -> Key -> m ()
+    :: Monad m => CSMT m k v a -> Hashing a -> Key -> m ()
 deleting csmt hashing key = do
     mpath <- newDeletionPath (query csmt) key
     case mpath of
@@ -36,14 +36,14 @@ deleting csmt hashing key = do
         Just path -> change csmt $ deletionPathToOps hashing path
 
 deletionPathToOps
-    :: forall a
+    :: forall k v a
      . Hashing a
     -> DeletionPath a
-    -> [Op a]
+    -> [Op k v a]
 deletionPathToOps hashing = snd . go []
   where
-    go :: Key -> DeletionPath a -> (Maybe (Indirect a), [Op a])
-    go k (Value _ _v) = (Nothing, [Delete k])
+    go :: Key -> DeletionPath a -> (Maybe (Indirect a), [Op k v a])
+    go k (Value _ _v) = (Nothing, [DeleteCSMT k])
     go k (Branch j d v i) =
         let
             (msb, xs) = go (k <> j <> [d]) v
@@ -53,7 +53,7 @@ deletionPathToOps hashing = snd . go []
                     let h = addWithDirection hashing d i' i
                         i'' = Indirect{jump = j, value = h}
                     in  ( Just i''
-                        , [Insert k i''] <> xs
+                        , [InsertCSMT k i''] <> xs
                         )
                 Nothing ->
                     let i' =
@@ -62,8 +62,8 @@ deletionPathToOps hashing = snd . go []
                                 , value = value i
                                 }
                     in  ( Just i'
-                        , [ Insert k i'
-                          , Delete (k <> j <> [opposite d])
+                        , [ InsertCSMT k i'
+                          , DeleteCSMT (k <> j <> [opposite d])
                           ]
                             <> xs
                         )

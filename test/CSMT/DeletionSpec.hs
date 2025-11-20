@@ -257,9 +257,9 @@ spec = do
                 ops = deletionPathToOps intHashing mp
               in
                 ops
-                    `shouldBe` [ Insert [] (indirect [R, L] 3)
-                               , Delete [R]
-                               , Delete [L]
+                    `shouldBe` [ InsertCSMT [] (indirect [R, L] 3)
+                               , DeleteCSMT [R]
+                               , DeleteCSMT @() @() [L]
                                ]
         it
             "inserting some facts and deleting them in a random order results in an empty tree"

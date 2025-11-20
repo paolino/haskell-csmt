@@ -86,10 +86,11 @@ parseHash bs
 keyToHash :: Key -> Hash
 keyToHash = mkHash . evalPutM . putKey
 
-insert :: Monad m => CSMT m Hash -> ByteString -> ByteString -> m ()
+insert
+    :: Monad m => CSMT m k v Hash -> ByteString -> ByteString -> m ()
 insert csmt k v = inserting csmt hashHashing (byteStringToKey k) (mkHash v)
 
-delete :: Monad m => CSMT m Hash -> ByteString -> m ()
+delete :: Monad m => CSMT m k v Hash -> ByteString -> m ()
 delete csmt k = deleting csmt hashHashing (byteStringToKey k)
 
 byteStringToKey :: ByteString -> Key
@@ -98,7 +99,7 @@ byteStringToKey bs = concatMap byteToDirections (B.unpack $ renderHash $ mkHash 
 byteToDirections :: Word8 -> Key
 byteToDirections byte = [if testBit byte i then R else L | i <- [7, 6 .. 0]]
 
-root :: Monad m => CSMT m Hash -> m (Maybe ByteString)
+root :: Monad m => CSMT m k v Hash -> m (Maybe ByteString)
 root csmt = do
     mi <- Interface.root hashHashing csmt
     case mi of
@@ -137,14 +138,14 @@ parseProof bs =
         Right pf -> Just pf
 
 generateInclusionProof
-    :: Monad m => CSMT m Hash -> ByteString -> m (Maybe ByteString)
+    :: Monad m => CSMT m k v Hash -> ByteString -> m (Maybe ByteString)
 generateInclusionProof csmt k = do
     mp <- Proof.mkInclusionProof csmt (byteStringToKey k)
     pure $ fmap renderProof mp
 
 verifyInclusionProof
     :: Monad m
-    => CSMT m Hash
+    => CSMT m k v Hash
     -> ByteString
     -> ByteString
     -> m Bool

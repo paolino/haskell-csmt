@@ -76,20 +76,22 @@ data Indirect a = Indirect
     }
     deriving (Show, Eq, Functor)
 
-data Op a
-    = Insert Key (Indirect a)
-    | Delete Key
+data Op k v a
+    = InsertCSMT Key (Indirect a)
+    | DeleteCSMT Key
+    | InsertKV k v
+    | DeleteKV k
     deriving (Show, Eq)
 
 -- | Type alias for a change function in some monad m. It support batch inserts.
-type Change m a = [Op a] -> m ()
+type Change m k v a = [Op k v a] -> m ()
 
 -- | Type alias for a query function in some monad m.
 type Query m a = Key -> m (Maybe (Indirect a))
 
 -- | The backend interface for a CSMT in some monad m.
-data CSMT m a = CSMT
-    { change :: Change m a
+data CSMT m k v a = CSMT
+    { change :: Change m k v a
     , query :: Query m a
     }
 
@@ -104,7 +106,7 @@ compareKeys (x : xs) (y : ys)
         in  (x : j, o, r)
     | otherwise = ([], x : xs, y : ys)
 
-root :: Monad m => Hashing a -> CSMT m a -> m (Maybe a)
+root :: Monad m => Hashing a -> CSMT m k v a -> m (Maybe a)
 root hsh csmt = do
     mi <- query csmt []
     pure $ case mi of

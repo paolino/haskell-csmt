@@ -34,7 +34,7 @@ compose R j left right = Compose j right left
 -- | Change a value into a CSMT
 inserting
     :: Monad m
-    => CSMT m a
+    => CSMT m k v a
     -- ^ Backend interface of the CSMT
     -> Hashing a
     -> Key
@@ -48,17 +48,17 @@ inserting (CSMT i q) hashing key value = do
 
 -- Scan a Compose tree and produce the resulting hash and list of inserts
 scanCompose
-    :: Hashing a -> Compose a -> (Indirect a, [Op a])
+    :: Hashing a -> Compose a -> (Indirect a, [Op k v a])
 scanCompose Hashing{combineHash} = go []
   where
-    go k (Leaf i) = (i, [Insert k i])
+    go k (Leaf i) = (i, [InsertCSMT k i])
     go k (Compose jump left right) =
         let k' = k <> jump
             (hl, ls) = go (k' <> [L]) left
             (hr, rs) = go (k' <> [R]) right
             value = combineHash hl hr
             i = Indirect{jump, value}
-        in  (i, ls <> rs <> [Insert k i])
+        in  (i, ls <> rs <> [InsertCSMT k i])
 
 -- Build a Compose tree for inserting a value at a given key
 mkCompose

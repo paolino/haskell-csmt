@@ -107,10 +107,10 @@ spec = around tempDB $ do
                             { jump = []
                             , value = "test value" :: ByteString
                             }
-                change rocksDBCSMT [Insert [] v]
+                change rocksDBCSMT [InsertCSMT [] v]
                 r <- rocksDBCSMT `query` []
                 liftIO $ r `shouldBe` Just v
-                change (rocksDBCSMT @ByteString) [Delete []]
+                change (rocksDBCSMT @ByteString) [DeleteCSMT []]
                 r2 <- (rocksDBCSMT @ByteString) `query` []
                 liftIO $ r2 `shouldBe` Nothing
 

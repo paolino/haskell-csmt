@@ -58,23 +58,25 @@ rocksDBQuery k = do
     r <- lift $ get db rdbk
     pure $ rocksValueToIndirect <$> r
 
-rocksDBChange :: ByteArray a => Change RocksDB a
+rocksDBChange :: ByteArray a => Change RocksDB k v a
 rocksDBChange kvs = do
     let ops = prepare kvs
     db <- ask
     lift $ write db ops
   where
-    prepare :: ByteArray a => [Op a] -> [BatchOp]
-    prepare = fmap $ \case
-        Insert k ind ->
+    prepare :: ByteArray a => [Op k v a] -> [BatchOp]
+    prepare = concatMap $ \case
+        InsertCSMT k ind ->
             let rdbk = mkKey k
                 rdbv = indirectToRocksValue ind
-            in  Put rdbk rdbv
-        Delete k ->
+            in  [Put rdbk rdbv]
+        DeleteCSMT k ->
             let rdbk = mkKey k
-            in  Del rdbk
+            in  [Del rdbk]
+        InsertKV _ _ -> []
+        DeleteKV _ -> []
 
-rocksDBCSMT :: ByteArray a => CSMT RocksDB a
+rocksDBCSMT :: ByteArray a => CSMT RocksDB k v a
 rocksDBCSMT =
     CSMT
         { change = rocksDBChange
