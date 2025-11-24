@@ -7,6 +7,11 @@ WARNING: This project is in early development and is not production-ready. Use a
 
 ## What is CSMT?
 
+```asciinema-player
+{
+"file": "assets/asciinema/bootstrap.cast"
+}
+```
 This package provides:
 
 - A Haskell library implementing a Compact Sparse Merkle Tree (CSMT) data structure with support for persistent storage backends. It offers efficient insertion, deletion, and proof generation functionalities, making it suitable for applications requiring verifiable data structures.

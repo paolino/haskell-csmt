@@ -11,9 +11,10 @@
     flake-parts.url = "github:hercules-ci/flake-parts";
     flake-utils.url = "github:hamishmack/flake-utils/hkm/nested-hydraJobs";
     mkdocs.url = "github:paolino/dev-assets?dir=mkdocs";
+    asciinema.url = "github:paolino/dev-assets?dir=asciinema";
   };
 
-  outputs = inputs@{ self, nixpkgs, flake-utils, haskellNix, mkdocs, ... }:
+  outputs = inputs@{ self, nixpkgs, flake-utils, haskellNix, mkdocs, asciinema, ... }:
     let
       lib = nixpkgs.lib;
       version = self.dirtyShortRev or self.shortRev;
@@ -34,6 +35,7 @@
             indexState = "2025-08-07T00:00:00Z";
             inherit pkgs;
             mkdocs = mkdocs.packages.${system};
+            asciinema = asciinema.packages.${system};
           };
 
           linux-artifacts =

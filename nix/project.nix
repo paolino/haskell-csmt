@@ -1,4 +1,4 @@
-{ indexState, pkgs, mkdocs, ... }:
+{ indexState, pkgs, mkdocs, asciinema, ... }:
 
 let
   libOverlay = { lib, pkgs, ... }: { };
@@ -22,6 +22,8 @@ let
       pkgs.mkdocs
       mkdocs.mkdocs-asciinema-player
       mkdocs.mkdocs-markdown-callouts
+      asciinema.compress
+      asciinema.resize
       pkgs.asciinema
 
     ];
