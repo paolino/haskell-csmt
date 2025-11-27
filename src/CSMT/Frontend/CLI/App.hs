@@ -27,9 +27,11 @@ import Data.ByteArray.Encoding
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Char8 qualified as BC
+import Data.Graph (Tree)
 import OptEnvConf
     ( Parser
     , argument
+    , env
     , help
     , metavar
     , reader
@@ -68,6 +70,33 @@ data Command
     | -- | Comment
       C
 
+data Error
+    = EmptyProof
+    | TreeEmpty
+    | InvalidProofFormat
+    | NoProofFound
+    | KeyNotFound
+    | DeletedKey
+    | AddedKey
+    | Valid
+    | Invalid
+    | UnknownCommand
+    | Comment
+    deriving (Show)
+
+renderError :: Error -> String
+renderError EmptyProof = "Empty proof for the first insertion"
+renderError TreeEmpty = "Tree is empty"
+renderError InvalidProofFormat = "Invalid proof format"
+renderError NoProofFound = "No proof found"
+renderError KeyNotFound = "Key not found"
+renderError DeletedKey = "Deleted key, exclusion proof generation not implemented"
+renderError AddedKey = "Added key, inclusion proof generated"
+renderError Valid = "Valid proof"
+renderError Invalid = "Invalid proof"
+renderError UnknownCommand = helpInteractive
+renderError Comment = ""
+
 parseCommand :: ByteString -> Maybe Command
 parseCommand line =
     case B.words line of
@@ -81,8 +110,14 @@ parseCommand line =
         "#" : _comment -> Just C
         _ -> Nothing
 
-printHash :: ByteString -> ByteString -> IO ()
-printHash what = B.putStrLn . ((what <> ": ") <>) . convertToBase Base64
+type Prompt = Maybe ByteString
+
+mkPrompt :: Bool -> String -> Prompt
+mkPrompt isPiped cmd = if isPiped then Nothing else Just (BC.pack cmd)
+
+printHash :: Prompt -> ByteString -> IO ()
+printHash (Just prompt) what = B.putStrLn . ((prompt <> ": ") <>) . convertToBase Base64 $ what
+printHash Nothing what = B.putStrLn . convertToBase Base64 $ what
 
 readHash :: ByteString -> Maybe ByteString
 readHash bs = case convertFromBase Base64 bs of
@@ -92,47 +127,50 @@ readHash bs = case convertFromBase Base64 bs of
 rocksDBBackend :: Backend RocksDB.RocksDB ByteString ByteString Hash
 rocksDBBackend = RocksDB.rocksDBBackend mkHash
 
-core :: Bool -> RunRocksDB -> String -> IO ()
-core isPiped (RunRocksDB run) l' = case parseCommand $ BC.pack l' of
-    Just (I k v) -> do
-        run $ insert rocksDBBackend k v
-        unless isPiped
-            $ do
-                r <- run $ generateInclusionProof rocksDBBackend k
-                case r of
-                    Just "" -> putStrLn "Empty proof for the first insertion"
-                    Just proof -> do
-                        printHash "proof" proof
-                    Nothing -> putStrLn "Tree is empty"
-    Just (D k) -> do
-        run $ delete rocksDBBackend k
-        unless isPiped
-            $ putStrLn "Deleted key, exclusion proof generation not implemented"
-    -- Deletion is not implemented in this example
-    Just (Q k) -> do
-        r <- run $ generateInclusionProof rocksDBBackend k
-        case r of
-            Just proof -> printHash "proof" proof
-            Nothing -> putStrLn "No proof found"
-    Just R -> do
-        r <- run $ root rocksDBBackend
-        case r of
-            Just rootHash -> printHash "root" rootHash
-            Nothing -> putStrLn "Tree is empty"
-    Just (V value proof) -> do
-        case readHash proof of
-            Just decoded -> do
-                r <- run $ verifyInclusionProof rocksDBBackend value decoded
-                putStrLn $ if r then "Valid proof" else "Invalid proof"
-            Nothing -> putStrLn "Invalid proof format"
-    Just (W k) -> do
-        mv <- run $ queryKV rocksDBBackend k
-        case mv of
-            Just v -> BC.putStrLn v
-            Nothing -> putStrLn "Key not found"
-    Just C -> return ()
-    Nothing -> putStrLn helpInteractive
+data Output
+    = Binary String ByteString
+    | ErrorMsg Error
 
+core :: Bool -> RunRocksDB -> String -> IO ()
+core isPiped (RunRocksDB run) l' = do
+    r <- case parseCommand $ BC.pack l' of
+        Just (I k v) -> do
+            run $ insert rocksDBBackend k v
+            pure $ ErrorMsg AddedKey
+        Just (D k) -> do
+            run $ delete rocksDBBackend k
+            pure $ ErrorMsg DeletedKey
+        Just (Q k) -> do
+            r <- run $ generateInclusionProof rocksDBBackend k
+            pure $ case r of
+                Just proof -> Binary "proof" proof
+                Nothing -> ErrorMsg NoProofFound
+        Just R -> do
+            r <- run $ root rocksDBBackend
+            pure $ case r of
+                Just rootHash -> Binary "root" rootHash
+                Nothing -> ErrorMsg TreeEmpty
+        Just (V value proof) -> do
+            case readHash proof of
+                Just decoded -> do
+                    r <- run $ verifyInclusionProof rocksDBBackend value decoded
+                    pure $ ErrorMsg $ if r then Valid else Invalid
+                Nothing -> pure $ ErrorMsg InvalidProofFormat
+        Just (W k) -> do
+            mv <- run $ queryKV rocksDBBackend k
+            pure $ case mv of
+                Just v -> Binary "value" v
+                Nothing -> ErrorMsg KeyNotFound
+        Just C -> pure $ ErrorMsg Comment
+        Nothing -> pure $ ErrorMsg UnknownCommand
+    case r of
+        Binary prompt hash -> reportBinary prompt hash
+        ErrorMsg e -> reportError' e
+  where
+    reportBinary prompt = printHash (mkPrompt isPiped prompt)
+    reportError' e
+        | isPiped = print e
+        | otherwise = putStrLn $ renderError e
 newtype Options = Options
     { optDbPath :: FilePath
     }
@@ -144,6 +182,7 @@ parseDbPath =
         , metavar "DB_PATH"
         , help "Path to RocksDB database"
         , reader str
+        , env "CSMT_DB_PATH"
         ]
 
 optionsParser :: Parser Options

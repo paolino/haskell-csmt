@@ -14,7 +14,8 @@
     asciinema.url = "github:paolino/dev-assets?dir=asciinema";
   };
 
-  outputs = inputs@{ self, nixpkgs, flake-utils, haskellNix, mkdocs, asciinema, ... }:
+  outputs =
+    inputs@{ self, nixpkgs, flake-utils, haskellNix, mkdocs, asciinema, ... }:
     let
       lib = nixpkgs.lib;
       version = self.dirtyShortRev or self.shortRev;
