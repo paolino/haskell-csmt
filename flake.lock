@@ -556,11 +556,11 @@
       },
       "locked": {
         "dir": "mkdocs",
-        "lastModified": 1763918365,
-        "narHash": "sha256-PztfXxnPCDX4DzHvB5qnBqIAYSxi82yNoNgyXzSKLIs=",
+        "lastModified": 1764245756,
+        "narHash": "sha256-ZSJInH2+xEjZO1h4MlA9RU4tLsYObgPMG70Ya7SqrVY=",
         "owner": "paolino",
         "repo": "dev-assets",
-        "rev": "4a044159615e8297574d5f3c3e7ff5f232af7660",
+        "rev": "1623f29257913fec47ede23d9363592e1dce0cc0",
         "type": "github"
       },
       "original": {

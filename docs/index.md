@@ -3,7 +3,7 @@ WARNING: This project is in early development and is not production-ready. Use a
 
 # CSMT haskell library and http service
 
-[![GitHub](https://img.shields.io/badge/github-paolino/csmt-blue?logo=github)](https://github.com/paolino/csmt) [![CI](https://github.com/paolino/csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/CI.yaml)
+[![CI](https://github.com/paolino/csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/CI.yaml) [![Build and deploy documentation](https://github.com/paolino/csmt/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/deploy-docs.yaml)
 
 ## What is CSMT?
 
@@ -13,7 +13,8 @@ WARNING: This project is in early development and is not production-ready. Use a
 , "cols": 100
 }
 ```
-This package provides:
+
+This package provides (or will):
 
 - A Haskell library implementing a Compact Sparse Merkle Tree (CSMT) data structure with support for persistent storage backends. It offers efficient insertion, deletion, and proof generation functionalities, making it suitable for applications requiring verifiable data structures.
 - A CLI tool for interacting with the CSMT, allowing users to perform operations such as adding and removing elements, generating proofs, and verifying membership within the tree.
@@ -40,6 +41,8 @@ There is room for optimization via parallel insertions, but these results are pr
     - [ ] Proof generation benchmarks
     - [ ] Proof verification benchmarks
     - [ ] Production grade tests
+    - [ ] Raw key support (vs hashed keys)
+    - [ ] Partial key support
 - CLI tool
     - [x] Add elements
     - [x] Remove elements
@@ -49,28 +52,3 @@ There is room for optimization via parallel insertions, but these results are pr
 - HTTP service
     - [ ] RESTful API for CSMT operations
     - [ ] Documentation of API endpoints
-
-## Installation
-
-### Docker images
-
-Docker images are available on the CI artifacts. [CI](https://github.com/paolino/csmt/actions/workflows/CI.yaml)
-
-### Arx linux packages
-
-Arx packages are available on the CI artifacts. [CI](https://github.com/paolino/csmt/actions/workflows/CI.yaml)
-
-### Building from source
-
-You can build with nix
-
-```bash
-nix shell nixpkgs#cachix -c cachix use paolino
-nix shell github:paolino/csmt --refresh
-```
-
-Or via cabal provided you have a working Haskell environment and rocksdb development files installed.
-
-```bash
-cabal install
-```

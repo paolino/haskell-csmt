@@ -20,8 +20,10 @@ let
       pkgs.nixfmt-classic
       pkgs.shellcheck
       pkgs.mkdocs
-      mkdocs.mkdocs-asciinema-player
-      mkdocs.mkdocs-markdown-callouts
+      mkdocs.from-nixpkgs
+      mkdocs.asciinema-plugin
+      mkdocs.markdown-callouts
+      mkdocs.markdown-graphviz
       asciinema.compress
       asciinema.resize
       pkgs.asciinema
