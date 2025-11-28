@@ -23,11 +23,11 @@ import CSMT.Test.Lib
     ( deleteInt
     , genPaths
     , identityFromKV
-    , indirect
     , insertInt
     , inserted
     , intHashing
     , mkDeletionPath
+    , node
     )
 import Test.Hspec (Spec, describe, it, shouldBe)
 import Test.QuickCheck
@@ -57,14 +57,14 @@ spec = do
               in
                 mp
                     `shouldBe` Just
-                        (Branch [] L (Value [] 1) (indirect [] 2))
+                        (Branch [] L (Value [] 1) (node [] 2))
         it "constructs a deletion path for a tree with jumps"
             $ let
                 rs0 = insertInt emptyInMemoryDB [L, L] (1 :: Int)
                 rs1 = insertInt rs0 [L, R] (2 :: Int)
                 mp = mkDeletionPath identityFromKV rs1 [L, L]
               in
-                mp `shouldBe` Just (Branch [L] L (Value [] 1) (indirect [] 2))
+                mp `shouldBe` Just (Branch [L] L (Value [] 1) (node [] 2))
         it "constructs a deletion path for a deeper tree with jumps"
             $ let
                 rs0 = insertInt emptyInMemoryDB [L, L, R] (1 :: Int)
@@ -85,9 +85,9 @@ spec = do
                                     []
                                     L
                                     (Value [R] 1)
-                                    (indirect [L] 2)
+                                    (node [L] 2)
                                 )
-                                (indirect [L, R] 3)
+                                (node [L, R] 3)
                             )
                     mp1
                         `shouldBe` Just
@@ -98,9 +98,9 @@ spec = do
                                     []
                                     R
                                     (Value [L] 2)
-                                    (indirect [R] 1)
+                                    (node [R] 1)
                                 )
-                                (indirect [L, R] 3)
+                                (node [L, R] 3)
                             )
                     mp2
                         `shouldBe` Just
@@ -108,7 +108,7 @@ spec = do
                                 []
                                 R
                                 (Value [L, R] 3)
-                                (indirect [] 4)
+                                (node [] 4)
                             )
                     rs3 `shouldBe` rs1
 
@@ -131,9 +131,9 @@ spec = do
                                     [L]
                                     L
                                     (Value [] 1)
-                                    (indirect [] 2)
+                                    (node [] 2)
                                 )
-                                (indirect [R, R] 3)
+                                (node [R, R] 3)
                             )
                     mp1
                         `shouldBe` Just
@@ -144,9 +144,9 @@ spec = do
                                     [L]
                                     R
                                     (Value [] 2)
-                                    (indirect [] 1)
+                                    (node [] 1)
                                 )
-                                (indirect [R, R] 3)
+                                (node [R, R] 3)
                             )
                     mp2
                         `shouldBe` Just
@@ -154,7 +154,7 @@ spec = do
                                 []
                                 R
                                 (Value [R, R] 3)
-                                (indirect [L] 3)
+                                (node [L] 3)
                             )
 
         it "deletes the singleton tree"
@@ -189,32 +189,32 @@ spec = do
               in
                 do
                     inMemoryCSMT dll
-                        `shouldBe` [ ([], indirect [] 10)
-                                   , ([R], indirect [] 7)
-                                   , ([L], indirect [R] 2)
-                                   , ([R, L], indirect [] 3)
-                                   , ([R, R], indirect [] 4)
+                        `shouldBe` [ ([], node [] 10)
+                                   , ([R], node [] 7)
+                                   , ([L], node [R] 2)
+                                   , ([R, L], node [] 3)
+                                   , ([R, R], node [] 4)
                                    ]
                     inMemoryCSMT dlr
-                        `shouldBe` [ ([], indirect [] 8)
-                                   , ([R], indirect [] 7)
-                                   , ([L], indirect [L] 1)
-                                   , ([R, L], indirect [] 3)
-                                   , ([R, R], indirect [] 4)
+                        `shouldBe` [ ([], node [] 8)
+                                   , ([R], node [] 7)
+                                   , ([L], node [L] 1)
+                                   , ([R, L], node [] 3)
+                                   , ([R, R], node [] 4)
                                    ]
                     inMemoryCSMT drl
-                        `shouldBe` [ ([], indirect [] 8)
-                                   , ([L], indirect [] 3)
-                                   , ([R], indirect [R] 4)
-                                   , ([L, L], indirect [] 1)
-                                   , ([L, R], indirect [] 2)
+                        `shouldBe` [ ([], node [] 8)
+                                   , ([L], node [] 3)
+                                   , ([R], node [R] 4)
+                                   , ([L, L], node [] 1)
+                                   , ([L, R], node [] 2)
                                    ]
                     inMemoryCSMT drr
-                        `shouldBe` [ ([], indirect [] 6)
-                                   , ([L], indirect [] 3)
-                                   , ([R], indirect [L] 3)
-                                   , ([L, L], indirect [] 1)
-                                   , ([L, R], indirect [] 2)
+                        `shouldBe` [ ([], node [] 6)
+                                   , ([L], node [] 3)
+                                   , ([R], node [L] 3)
+                                   , ([L, L], node [] 1)
+                                   , ([L, R], node [] 2)
                                    ]
         it "deletes 2 of four cousin keys"
             $ let
@@ -226,9 +226,9 @@ spec = do
               in
                 do
                     inMemoryCSMT dlrl
-                        `shouldBe` [ ([], indirect [] 6)
-                                   , ([L], indirect [R] 2)
-                                   , ([R], indirect [L] 3)
+                        `shouldBe` [ ([], node [] 6)
+                                   , ([L], node [R] 2)
+                                   , ([R], node [L] 3)
                                    ]
         it "deletes 3 of four cousin keys"
             $ let
@@ -242,7 +242,7 @@ spec = do
               in
                 do
                     inMemoryCSMT dlr
-                        `shouldBe` [ ([], indirect [R, L] 3)
+                        `shouldBe` [ ([], node [R, L] 3)
                                    ]
         it "computes the right deletion path for [[L, R], [R, L]]"
             $ let
@@ -257,7 +257,7 @@ spec = do
                             []
                             L
                             (Value [R] 2)
-                            (indirect [L] 3)
+                            (node [L] 3)
                         )
         it "computes the right ops to delete [L,R] from [[L, R], [R, L]]"
             $ let
@@ -268,7 +268,7 @@ spec = do
                 ops = deletionPathToOps intHashing mp
               in
                 ops
-                    `shouldBe` [ InsertCSMT [] (indirect [R, L] 3)
+                    `shouldBe` [ InsertCSMT [] (node [R, L] 3)
                                , DeleteCSMT [R]
                                , DeleteCSMT @() @() [L]
                                ]

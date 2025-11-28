@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE OverloadedLists #-}
 
 module CSMT.Test.Lib
@@ -8,7 +9,7 @@ module CSMT.Test.Lib
     , genKey
     , genPaths
     , genSomePaths
-    , indirect
+    , node
     , insert
     , inserted
     , insertInt
@@ -28,6 +29,9 @@ module CSMT.Test.Lib
     , insertMHash
     , insertMList
     , identityFromKV
+    , element
+    , list
+    , ListOf
     )
 where
 
@@ -54,6 +58,7 @@ import CSMT.Deletion
     )
 import CSMT.Hashes (Hash, hashHashing, mkHash)
 import CSMT.Interface (FromKV (..), Hashing (..))
+import Control.Monad.Free (Free (..), liftF)
 import Data.Foldable (Foldable (..), foldl')
 import Data.List (nub)
 import Data.String (IsString (..))
@@ -163,8 +168,8 @@ listHashing =
 verifyMHash :: Key -> Hash -> Pure Key Hash Hash Bool
 verifyMHash = verifyM FromKV{fromK = id, fromV = id} hashHashing
 
-indirect :: Key -> a -> Indirect a
-indirect jump value = Indirect{jump, value}
+node :: Key -> a -> Indirect a
+node jump value = Indirect{jump, value}
 
 intHash :: Int -> Hash
 intHash = mkHash . fromString . show
@@ -208,12 +213,15 @@ mkDeletionPath fromKV s =
         . runPure s
         . newDeletionPath (queryCSMT $ pureBackend fromKV)
 
--- showState :: Show a => Pure k v a ()
--- showState = do
---     s <- get
---     pTraceShow s $ pure ()
+data List e a
+    = Cons e a
+    deriving (Functor)
 
--- showProof :: Show a => Key -> Pure k v a ()
--- showProof k = do
---     p <- proofM k
---     pTraceShow p $ pure ()
+type ListOf e = Free (List e)
+
+element :: e -> ListOf e ()
+element x = liftF (Cons x ())
+
+list :: ListOf a () -> [a]
+list (Pure _) = []
+list (Free (Cons x xs)) = x : list xs

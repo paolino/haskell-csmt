@@ -98,6 +98,7 @@ library test-lib
   build-depends:
     , base
     , csmt
+    , free
     , QuickCheck
 
   hs-source-dirs:   test-lib
@@ -110,6 +111,8 @@ test-suite unit-tests
   build-depends:
     , base
     , bytestring
+    , cereal
+    , containers
     , csmt
     , csmt:test-lib
     , filepath
