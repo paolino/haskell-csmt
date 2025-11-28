@@ -41,6 +41,9 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Architecture:
-    - architecture.md
-    - Partial keys: partial-keys.md
+    - System: architecture/system.md
+    - Storage: architecture/storage.md
+    - Encodings: architecture/encodings.md
+    - Example: architecture/example.md
+
   - Manual: manual.md
