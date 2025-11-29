@@ -140,6 +140,7 @@ benchmark bench
   main-is:          main.hs
   build-depends:
     , base
+    , bytestring
     , csmt
     , deepseq
     , filepath

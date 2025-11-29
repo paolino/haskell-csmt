@@ -107,7 +107,7 @@ queryKV
 queryKV = Interface.queryKV
 
 byteStringToKey :: ByteString -> Key
-byteStringToKey bs = concatMap byteToDirections (B.unpack $ renderHash $ mkHash bs)
+byteStringToKey bs = concatMap byteToDirections (B.unpack bs)
 
 byteToDirections :: Word8 -> Key
 byteToDirections byte = [if testBit byte i then R else L | i <- [7, 6 .. 0]]

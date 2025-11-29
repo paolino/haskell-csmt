@@ -7,15 +7,22 @@ import CSMT.Backend.RocksDB
 import CSMT.Backend.RocksDB qualified as RocksDB
 import CSMT.Hashes
     ( Hash
+    , byteStringToKey
     , delete
     , generateInclusionProof
     , insert
     , mkHash
     , queryKV
+    , renderHash
     , root
     , verifyInclusionProof
     )
-import CSMT.Interface (Backend)
+import CSMT.Interface
+    ( Backend (queryCSMT)
+    , Indirect (..)
+    , Key
+    )
+import CSMT.Interface qualified as I
 import Control.Monad (unless)
 import Control.Monad.Fix (fix)
 import Control.Monad.Trans.Class (MonadTrans (..))
@@ -25,9 +32,7 @@ import Data.ByteArray.Encoding
     , convertToBase
     )
 import Data.ByteString (ByteString)
-import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Char8 qualified as BC
-import Data.Graph (Tree)
 import OptEnvConf
     ( Parser
     , argument
@@ -61,6 +66,8 @@ data Command
       D ByteString
     | -- | Query inclusion proof for key
       Q ByteString
+    | -- | Query hash at partial key
+      QB (Maybe Key)
     | -- | Verify inclusion proof for value and proof
       V ByteString ByteString
     | -- | Query key-value pair
@@ -69,12 +76,16 @@ data Command
       R
     | -- | Comment
       C
+    | -- | Show key directions
+      K ByteString
 
 data Error
     = EmptyProof
     | TreeEmpty
     | InvalidProofFormat
+    | InvalidKeyFormat
     | NoProofFound
+    | NoNodeFound
     | KeyNotFound
     | DeletedKey
     | AddedKey
@@ -88,7 +99,9 @@ renderError :: Error -> String
 renderError EmptyProof = "Empty proof for the first insertion"
 renderError TreeEmpty = "Tree is empty"
 renderError InvalidProofFormat = "Invalid proof format"
+renderError InvalidKeyFormat = "Invalid key format"
 renderError NoProofFound = "No proof found"
+renderError NoNodeFound = "No node found at the given key"
 renderError KeyNotFound = "Key not found"
 renderError DeletedKey = "Deleted key, exclusion proof generation not implemented"
 renderError AddedKey = "Added key, inclusion proof generated"
@@ -99,16 +112,26 @@ renderError Comment = ""
 
 parseCommand :: ByteString -> Maybe Command
 parseCommand line =
-    case B.words line of
+    case BC.words line of
         ["i", k, v] -> Just (I k v)
         ["d", k] -> Just (D k)
         ["q", k] -> Just (Q k)
+        ["p"] -> Just (QB $ Just [])
+        ["p", ks] -> Just (QB $ parseLRKey ks)
         ["w", k] -> Just (W k)
         ["v", value] -> Just (V value "")
         ["v", value, proof] -> Just (V value proof)
         ["r"] -> Just R
+        ["k", key] -> Just (K key)
         "#" : _comment -> Just C
         _ -> Nothing
+
+parseLRKey :: ByteString -> Maybe Key
+parseLRKey = traverse step . BC.unpack
+  where
+    step 'L' = Just I.L
+    step 'R' = Just I.R
+    step _ = Nothing
 
 type Prompt = Maybe ByteString
 
@@ -116,8 +139,8 @@ mkPrompt :: Bool -> String -> Prompt
 mkPrompt isPiped cmd = if isPiped then Nothing else Just (BC.pack cmd)
 
 printHash :: Prompt -> ByteString -> IO ()
-printHash (Just prompt) what = B.putStrLn . ((prompt <> ": ") <>) . convertToBase Base64 $ what
-printHash Nothing what = B.putStrLn . convertToBase Base64 $ what
+printHash (Just prompt) what = BC.putStrLn . ((prompt <> ": ") <>) . convertToBase Base64 $ what
+printHash Nothing what = BC.putStrLn . convertToBase Base64 $ what
 
 readHash :: ByteString -> Maybe ByteString
 readHash bs = case convertFromBase Base64 bs of
@@ -129,6 +152,8 @@ rocksDBBackend = RocksDB.rocksDBBackend mkHash
 
 data Output
     = Binary String ByteString
+    | Text ByteString
+    | Node (Indirect Hash)
     | ErrorMsg Error
 
 core :: Bool -> RunRocksDB -> String -> IO ()
@@ -145,6 +170,14 @@ core isPiped (RunRocksDB run) l' = do
             pure $ case r of
                 Just proof -> Binary "proof" proof
                 Nothing -> ErrorMsg NoProofFound
+        Just (QB mk) -> do
+            case mk of
+                Nothing -> pure $ ErrorMsg InvalidKeyFormat
+                Just k -> do
+                    mv <- run $ queryCSMT rocksDBBackend k
+                    pure $ case mv of
+                        Just v -> Node v
+                        Nothing -> ErrorMsg NoNodeFound
         Just R -> do
             r <- run $ root rocksDBBackend
             pure $ case r of
@@ -159,18 +192,29 @@ core isPiped (RunRocksDB run) l' = do
         Just (W k) -> do
             mv <- run $ queryKV rocksDBBackend k
             pure $ case mv of
-                Just v -> Binary "value" v
+                Just v -> Text v
                 Nothing -> ErrorMsg KeyNotFound
         Just C -> pure $ ErrorMsg Comment
+        Just (K k) -> pure $ Text $ BC.pack $ byteStringToKey k >>= show
         Nothing -> pure $ ErrorMsg UnknownCommand
     case r of
         Binary prompt hash -> reportBinary prompt hash
+        Text txt -> BC.putStrLn txt
         ErrorMsg e -> reportError' e
+        Node node -> do
+            BC.putStrLn $ renderKey $ jump node
+            reportBinary "value" (renderHash $ value node)
   where
     reportBinary prompt = printHash (mkPrompt isPiped prompt)
     reportError' e
         | isPiped = print e
         | otherwise = putStrLn $ renderError e
+
+renderKey :: Key -> ByteString
+renderKey = BC.pack . fmap dirToByte
+  where
+    dirToByte I.L = 'L'
+    dirToByte I.R = 'R'
 newtype Options = Options
     { optDbPath :: FilePath
     }
@@ -201,7 +245,7 @@ main = do
             then fix $ \loop -> do
                 eof <- isEOF
                 unless eof $ do
-                    line <- B.getLine
+                    line <- BC.getLine
                     core isPiped run (BC.unpack line)
                     loop
             else do
@@ -222,11 +266,13 @@ helpInteractive =
     unlines
         [ "Commands:"
         , "  i <key> <value>   Change key-value pair and print inclusion proof"
-        , "  w <key>           Query value for key"
+        , "  w <key>           Query value for key in bytestring"
         , "  d <key>           Delete key and print exclusion proof (soon)"
-        , "  q <key>           Query inclusion proof for key"
+        , "  q <key>           Query inclusion proof for key in bytestring"
+        , "  p <key>           Query node at partial key in directionsformat LRLRLL..."
         , "  v <value>         Verify inclusion proof for the singleton csmt"
         , "  v <value> <proof> Verify inclusion proof for a value"
         , "  r                 Print root hash of the tree"
+        , "  k <key>           Show key directions"
         , "  # <comment>       Add comment line (no operation)"
         ]

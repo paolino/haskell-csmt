@@ -3,10 +3,11 @@ import CSMT.Backend.RocksDB
     , rocksDBBackend
     , unsafeWithRocksDB
     )
-import CSMT.Hashes (insert, mkHash)
+import CSMT.Hashes (insert, mkHash, renderHash)
 import Control.DeepSeq (NFData (..))
 import Control.Exception (SomeException, catch)
 import Control.Monad (forM_)
+import Data.ByteString (ByteString)
 import Data.String (IsString (..))
 import Miniterion
     ( bench
@@ -26,6 +27,12 @@ data WithRocksDb = WithRocksDb
 instance NFData WithRocksDb where
     rnf (WithRocksDb _r _k) = ()
 
+v :: ByteString
+v = "value"
+
+mkKey :: Int -> ByteString
+mkKey = renderHash . mkHash . fromString . show
+
 envCSMT :: FilePath -> Int -> IO WithRocksDb
 envCSMT path n = do
     let dbPath = path </> "rocksdb"
@@ -33,9 +40,7 @@ envCSMT path n = do
     let r = run $ do
             let csmt = rocksDBBackend mkHash
             forM_ [1 .. n] $ \i -> do
-                let k = fromString $ show i
-                    v = "value"
-                insert csmt k v
+                insert csmt (mkKey i) v
     r `catch` \e -> do
         kill
         error
@@ -47,9 +52,7 @@ insertMany (WithRocksDb (RunRocksDB run) kill) m = do
     let r = run $ do
             let csmt = rocksDBBackend mkHash
             forM_ [1 .. m] $ \i -> do
-                let k = fromString $ show (10000000 + i)
-                    v = "value"
-                insert csmt k v
+                insert csmt (mkKey $ 10000000 + i) v
     r `catch` \e -> do
         kill
         error

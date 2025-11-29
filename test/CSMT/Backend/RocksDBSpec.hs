@@ -19,6 +19,7 @@ import CSMT.Backend.RocksDB qualified as RocksDB
 import CSMT.Deletion (deleting)
 import CSMT.Hashes
     ( Hash
+    , byteStringToKey
     , generateInclusionProof
     , hashHashing
     , insert
@@ -132,6 +133,16 @@ spec = around tempDB $ do
                 change rocksDBBackend [DeleteKV k]
                 r2 <- rocksDBBackend `queryKV` k
                 liftIO $ r2 `shouldBe` Nothing
+        it "cannot retrieve a non existent key"
+            $ \(RunRocksDB run) -> run $ do
+                change
+                    rocksDBBackend
+                    [ InsertCSMT
+                        (byteStringToKey "a")
+                        (Indirect [] (mkHash "v"))
+                    ]
+                r <- rocksDBBackend `queryCSMT` byteStringToKey "aa"
+                liftIO $ r `shouldBe` Nothing
         it "can insert a key value with csmt" $ \(RunRocksDB run) -> run $ do
             insert rocksDBBackend "my-csmt-key" "my-csmt-value"
             mv <- queryKV rocksDBBackend "my-csmt-key"
