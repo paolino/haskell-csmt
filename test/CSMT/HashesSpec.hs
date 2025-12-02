@@ -7,7 +7,7 @@ import CSMT.Hashes
     , renderProof
     )
 import CSMT.Interface (Direction (..), Indirect (..))
-import CSMT.Proofs (Proof (..), ProofStep (..))
+import CSMT.Proof.Insertion (Proof (..), ProofStep (..))
 import Data.ByteString qualified as B
 import Test.Hspec (Spec, describe, it, shouldBe)
 import Test.QuickCheck (Gen, Testable (..), elements, forAll, listOf)

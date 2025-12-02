@@ -61,7 +61,7 @@ library
     CSMT.Hashes
     CSMT.Insertion
     CSMT.Interface
-    CSMT.Proofs
+    CSMT.Proof.Insertion
     Data.Serialize.Extra
 
   build-depends:
@@ -129,7 +129,8 @@ test-suite unit-tests
     CSMT.HashesSpec
     CSMT.InsertionSpec
     CSMT.InterfaceSpec
-    CSMT.ProofsSpec
+    CSMT.Proof.InsertionSpec
+    CSMT.Proof.CompletenessSpec
 
 benchmark bench
   import:           warnings

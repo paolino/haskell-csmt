@@ -1,6 +1,6 @@
 {-# LANGUAGE StrictData #-}
 
-module CSMT.Proofs
+module CSMT.Proof.Insertion
     ( Proof (..)
     , ProofStep (..)
     , mkInclusionProof

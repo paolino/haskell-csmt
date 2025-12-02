@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedLists #-}
 
-module CSMT.ProofsSpec (spec)
+module CSMT.Proof.InsertionSpec (spec)
 where
 
 import CSMT
