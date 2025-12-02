@@ -32,6 +32,15 @@ module CSMT.Test.Lib
     , element
     , list
     , ListOf
+    , evalPure
+    , pureBackendIdentity
+    , evalPureFromEmptyDB
+    , indirect
+    , runPureFromEmptyDB
+    , insertIndirectM
+    , insertInts
+    , insertHashes
+    , manyRandomPaths
     )
 where
 
@@ -57,7 +66,7 @@ import CSMT.Deletion
     , newDeletionPath
     )
 import CSMT.Hashes (Hash, hashHashing, mkHash)
-import CSMT.Interface (FromKV (..), Hashing (..))
+import CSMT.Interface (Backend, FromKV (..), Hashing (..))
 import Control.Monad.Free (Free (..), liftF)
 import Data.Foldable (Foldable (..), foldl')
 import Data.List (nub)
@@ -65,6 +74,7 @@ import Data.String (IsString (..))
 import Test.QuickCheck
     ( listOf
     , listOf1
+    , scale
     , shuffle
     )
 import Test.QuickCheck.Gen (Gen, elements)
@@ -113,13 +123,13 @@ deleteM :: Ord k => FromKV k v a -> Hashing a -> k -> Pure k v a ()
 deleteM = deleting . pureBackend
 
 insertMInt :: Key -> Int -> Pure Key Int Int ()
-insertMInt = insertM FromKV{fromK = id, fromV = id} intHashing
+insertMInt = insertM identityFromKV intHashing
 
 insertMHash :: Key -> Hash -> Pure Key Hash Hash ()
-insertMHash = insertM FromKV{fromK = id, fromV = id} hashHashing
+insertMHash = insertM identityFromKV hashHashing
 
 insertMList :: Key -> [Int] -> Pure Key [Int] [Int] ()
-insertMList = insertM FromKV{fromK = id, fromV = id} listHashing
+insertMList = insertM identityFromKV listHashing
 
 keyToInt :: Key -> Int
 keyToInt = foldl' (\acc d -> acc * 2 + dirToBit d) 0
@@ -128,7 +138,7 @@ keyToInt = foldl' (\acc d -> acc * 2 + dirToBit d) 0
     dirToBit R = 1
 
 deleteMInt :: Key -> Pure Key Int Int ()
-deleteMInt = deleteM FromKV{fromK = id, fromV = id} intHashing
+deleteMInt = deleteM identityFromKV intHashing
 
 proofM :: Ord k => FromKV k v a -> k -> Pure k v a (Maybe (Proof a))
 proofM = mkInclusionProof . pureBackend
@@ -147,10 +157,10 @@ verifyM fromKV hashing k v = do
         Just p -> verifyInclusionProof (pureBackend fromKV) hashing v p
 
 verifyMInt :: Key -> Int -> Pure Key Int Int Bool
-verifyMInt = verifyM FromKV{fromK = id, fromV = id} intHashing
+verifyMInt = verifyM identityFromKV intHashing
 
 verifyMList :: Key -> [Int] -> Pure Key [Int] [Int] Bool
-verifyMList = verifyM FromKV{fromK = id, fromV = id} listHashing
+verifyMList = verifyM identityFromKV listHashing
 
 keyToListOfInt :: Key -> [Int]
 keyToListOfInt [] = [-1]
@@ -166,7 +176,7 @@ listHashing =
             keyToListOfInt kl <> l <> keyToListOfInt kr <> r
         }
 verifyMHash :: Key -> Hash -> Pure Key Hash Hash Bool
-verifyMHash = verifyM FromKV{fromK = id, fromV = id} hashHashing
+verifyMHash = verifyM identityFromKV hashHashing
 
 node :: Key -> a -> Indirect a
 node jump value = Indirect{jump, value}
@@ -181,6 +191,7 @@ inserted
     -> t (k, v)
     -> InMemoryDB k v a
 inserted fromKV hashing = foldl' (\m (k, v) -> insert fromKV hashing m k v) emptyInMemoryDB
+
 allPaths :: Int -> [Key]
 allPaths 0 = [[]]
 allPaths c = do
@@ -225,3 +236,31 @@ element x = liftF (Cons x ())
 list :: ListOf a () -> [a]
 list (Pure _) = []
 list (Free (Cons x xs)) = x : list xs
+
+evalPure :: InMemoryDB k v a -> Pure k v a b -> b
+evalPure db p = fst $ runPure db p
+
+pureBackendIdentity :: Backend (Pure Key v v) Key v v
+pureBackendIdentity = pureBackend identityFromKV
+
+evalPureFromEmptyDB :: Pure k v a b -> b
+evalPureFromEmptyDB = evalPure emptyInMemoryDB
+
+runPureFromEmptyDB
+    :: Pure k v a b -> (b, InMemoryDB k v a)
+runPureFromEmptyDB = runPure emptyInMemoryDB
+
+indirect :: Key -> a -> Indirect a
+indirect = Indirect
+
+insertIndirectM :: Hashing a -> Indirect a -> Pure Key a a ()
+insertIndirectM hashing (Indirect k v) = insertM identityFromKV hashing k v
+
+insertInts :: [Indirect Int] -> Pure Key Int Int ()
+insertInts = mapM_ $ insertIndirectM intHashing
+
+insertHashes :: [Indirect Hash] -> Pure Key Hash Hash ()
+insertHashes = mapM_ $ insertIndirectM hashHashing
+
+manyRandomPaths :: Gen [Key]
+manyRandomPaths = scale (* 10) $ genSomePaths 256
