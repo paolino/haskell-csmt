@@ -35,8 +35,8 @@ import CSMT.Interface
     , putKey
     )
 import CSMT.Interface qualified as Interface
-import CSMT.Proofs (Proof (..), ProofStep (..))
-import CSMT.Proofs qualified as Proof
+import CSMT.Proof.Insertion (Proof (..), ProofStep (..))
+import CSMT.Proof.Insertion qualified as Proof
 import Control.Monad (forM_, replicateM)
 import Crypto.Hash (Blake2b_256, hash)
 import Data.Bits (Bits (..))
@@ -152,7 +152,9 @@ parseProof bs =
 
 generateInclusionProof
     :: Monad m
-    => Backend m ByteString v Hash -> ByteString -> m (Maybe ByteString)
+    => Backend m ByteString v Hash
+    -> ByteString
+    -> m (Maybe ByteString)
 generateInclusionProof csmt k = do
     mp <- Proof.mkInclusionProof csmt k
     pure $ fmap renderProof mp
