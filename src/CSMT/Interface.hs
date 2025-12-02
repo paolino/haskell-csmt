@@ -30,6 +30,7 @@ module CSMT.Interface
     , getSizedByteString
     , putSizedByteString
     , addWithDirection
+    , prefix
     )
 where
 
@@ -77,7 +78,10 @@ data Indirect a = Indirect
     { jump :: Key
     , value :: a
     }
-    deriving (Show, Eq, Functor)
+    deriving (Show, Eq, Functor, Ord)
+
+prefix :: Key -> Indirect a -> Indirect a
+prefix q Indirect{jump, value} = Indirect{jump = q ++ jump, value}
 
 data Op k v a
     = InsertCSMT Key (Indirect a)
