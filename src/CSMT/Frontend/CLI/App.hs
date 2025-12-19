@@ -223,7 +223,7 @@ parseDbPath :: Parser FilePath
 parseDbPath =
     setting
         [ argument
-        , metavar "DB_PATH"
+        , metavar "DIR"
         , help "Path to RocksDB database"
         , reader str
         , env "CSMT_DB_PATH"

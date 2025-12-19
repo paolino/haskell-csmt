@@ -131,7 +131,7 @@ configCSMT =
         { createIfMissing = True
         , errorIfExists = False
         , paranoidChecks = False
-        , maxFiles = Nothing
+        , maxFiles = Just 3
         , prefixLength = Nothing
         , bloomFilter = False
         }
@@ -142,7 +142,7 @@ configKV =
         { createIfMissing = True
         , errorIfExists = False
         , paranoidChecks = False
-        , maxFiles = Nothing
+        , maxFiles = Just 3
         , prefixLength = Nothing
         , bloomFilter = False
         }
