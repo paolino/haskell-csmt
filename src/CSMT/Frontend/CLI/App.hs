@@ -1,10 +1,10 @@
 module CSMT.Frontend.CLI.App (main) where
 
-import CSMT.Backend.RocksDB
-    ( RunRocksDB (RunRocksDB)
-    , withRocksDB
+import CSMT.Backend.LMDB
+    ( RunLMDB (RunLMDB)
+    , withLMDB
     )
-import CSMT.Backend.RocksDB qualified as RocksDB
+import CSMT.Backend.LMDB qualified as LMDB
 import CSMT.Hashes
     ( Hash
     , byteStringToKey
@@ -147,8 +147,8 @@ readHash bs = case convertFromBase Base64 bs of
     Left _ -> Nothing
     Right h -> Just h
 
-rocksDBBackend :: Backend RocksDB.RocksDB ByteString ByteString Hash
-rocksDBBackend = RocksDB.rocksDBBackend mkHash
+rocksDBBackend :: Backend LMDB.LMDB ByteString ByteString Hash
+rocksDBBackend = LMDB.lmDBBackend mkHash
 
 data Output
     = Binary String ByteString
@@ -156,8 +156,8 @@ data Output
     | Node (Indirect Hash)
     | ErrorMsg Error
 
-core :: Bool -> RunRocksDB -> String -> IO ()
-core isPiped (RunRocksDB run) l' = do
+core :: Bool -> RunLMDB -> String -> IO ()
+core isPiped (RunLMDB run) l' = do
     r <- case parseCommand $ BC.pack l' of
         Just (I k v) -> do
             run $ insert rocksDBBackend k v
@@ -224,7 +224,7 @@ parseDbPath =
     setting
         [ argument
         , metavar "DIR"
-        , help "Path to RocksDB database"
+        , help "Path to LMDB database"
         , reader str
         , env "CSMT_DB_PATH"
         ]
@@ -239,7 +239,7 @@ main = do
     Options{optDbPath} <- runParser version "csmt" optionsParser
     hSetBuffering stdout LineBuffering
     hSetBuffering stdin LineBuffering
-    withRocksDB optDbPath $ \run -> do
+    withLMDB optDbPath $ \run -> do
         isPiped <- checkPipeline
         if isPiped
             then fix $ \loop -> do

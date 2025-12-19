@@ -54,6 +54,7 @@ library
   other-modules:    Paths_csmt
   exposed-modules:
     CSMT
+    CSMT.Backend.LMDB
     CSMT.Backend.Pure
     CSMT.Backend.RocksDB
     CSMT.Deletion
@@ -73,6 +74,7 @@ library
     , containers
     , crypton
     , haskeline
+    , lmdb-simple
     , memory
     , opt-env-conf
     , rocksdb-haskell-jprupp
