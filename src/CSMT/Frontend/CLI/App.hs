@@ -36,6 +36,7 @@ import Data.ByteString.Char8 qualified as BC
 import OptEnvConf
     ( Parser
     , argument
+    , auto
     , env
     , help
     , metavar
@@ -215,8 +216,9 @@ renderKey = BC.pack . fmap dirToByte
   where
     dirToByte I.L = 'L'
     dirToByte I.R = 'R'
-newtype Options = Options
+data Options = Options
     { optDbPath :: FilePath
+    , optMapSize :: Int
     }
 
 parseDbPath :: Parser FilePath
@@ -229,17 +231,29 @@ parseDbPath =
         , env "CSMT_DB_PATH"
         ]
 
+parseMapSize :: Parser Int
+parseMapSize =
+    setting
+        [ argument
+        , metavar "INT"
+        , help "LMDB map size in bytes"
+        , env "CSMT_DB_MAP_SIZE"
+        , help "LMDB map size in bytes"
+        , reader auto
+        ]
 optionsParser :: Parser Options
 optionsParser =
     Options
         <$> parseDbPath
+        <*> parseMapSize
 
 main :: IO ()
 main = do
-    Options{optDbPath} <- runParser version "csmt" optionsParser
+    Options{optDbPath, optMapSize} <-
+        runParser version "csmt" optionsParser
     hSetBuffering stdout LineBuffering
     hSetBuffering stdin LineBuffering
-    withLMDB optDbPath $ \run -> do
+    withLMDB optDbPath optMapSize $ \run -> do
         isPiped <- checkPipeline
         if isPiped
             then fix $ \loop -> do

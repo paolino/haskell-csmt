@@ -1,4 +1,3 @@
-{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE StrictData #-}
 
 module CSMT.Backend.LMDB
@@ -106,10 +105,10 @@ lmDBBackend mkA =
 
 newtype RunLMDB = RunLMDB (forall a. LMDB a -> IO a)
 
-withLMDB :: FilePath -> (RunLMDB -> IO b) -> IO b
-withLMDB path action = do
+withLMDB :: FilePath -> Int -> (RunLMDB -> IO b) -> IO b
+withLMDB path mapSize action = do
     env <-
         openReadWriteEnvironment
             path
-            defaultLimits{maxDatabases = 2, mapSize = 10_000_000_000}
+            defaultLimits{maxDatabases = 2, mapSize = mapSize}
     action (RunLMDB $ flip runReaderT env)
