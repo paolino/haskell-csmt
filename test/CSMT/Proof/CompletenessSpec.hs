@@ -4,9 +4,12 @@ module CSMT.Proof.CompletenessSpec (spec)
 where
 
 import CSMT
-    ( Backend (queryCSMT)
-    , Direction (..)
+    ( Direction (..)
+    , Standalone (StandaloneCSMTCol)
     , combineHash
+    )
+import CSMT.Backend.Pure
+    ( runPureTransaction
     )
 import CSMT.Hashes (hashHashing)
 import CSMT.Proof.Completeness
@@ -16,15 +19,17 @@ import CSMT.Proof.Completeness
     )
 import CSMT.Test.Lib
     ( evalPureFromEmptyDB
+    , hashCodecs
     , indirect
     , insertHashes
-    , insertInts
+    , insertWord64s
     , intHash
-    , intHashing
     , manyRandomPaths
-    , pureBackendIdentity
+    , word64Codecs
+    , word64Hashing
     )
 import Data.List (sort)
+import Database.KV.Transaction (query)
 import Test.Hspec (Spec, describe, it, shouldBe)
 import Test.QuickCheck (forAll, property)
 
@@ -37,8 +42,9 @@ spec = do
             $ \ks -> do
                 let values = zipWith indirect ks [1 ..]
                     collected = evalPureFromEmptyDB $ do
-                        insertInts values
-                        collectValues pureBackendIdentity []
+                        insertWord64s values
+                        runPureTransaction word64Codecs
+                            $ collectValues StandaloneCSMTCol []
                 collected
                     `shouldBe` sort values
         it "collects all values for a simple tree of hashes"
@@ -48,40 +54,47 @@ spec = do
                 let values = zipWith indirect ks (intHash <$> [1 ..])
                     collected = evalPureFromEmptyDB $ do
                         insertHashes values
-                        collectValues pureBackendIdentity []
+                        runPureTransaction hashCodecs
+                            $ collectValues StandaloneCSMTCol []
                 collected
                     `shouldBe` sort values
     describe "generateProof" $ do
         it "can generate proof for empty tree"
-            $ let mp = evalPureFromEmptyDB $ generateProof pureBackendIdentity []
+            $ let mp =
+                    evalPureFromEmptyDB
+                        $ runPureTransaction hashCodecs
+                        $ generateProof StandaloneCSMTCol []
               in  mp `shouldBe` Nothing
         it "can generate proof for simple tree"
             $ let
                 mp = evalPureFromEmptyDB $ do
-                    insertInts [indirect [L] 1]
-                    generateProof pureBackendIdentity []
+                    insertWord64s [indirect [L] 1]
+                    runPureTransaction word64Codecs
+                        $ generateProof StandaloneCSMTCol []
               in
                 mp `shouldBe` Just []
         it "can generate proof for larger tree"
             $ let
                 mp = evalPureFromEmptyDB $ do
-                    insertInts
+                    insertWord64s
                         [ indirect [L] 1
                         , indirect [R] 2
                         ]
-                    generateProof pureBackendIdentity []
+                    runPureTransaction word64Codecs
+                        $ generateProof StandaloneCSMTCol []
               in
                 mp `shouldBe` Just [(0, 1)]
         it "can generate proof for even larger tree"
             $ let
                 mp = evalPureFromEmptyDB $ do
-                    insertInts
+                    insertWord64s
                         [ indirect [L, L, L, L] 1
                         , indirect [L, R, L, L] 5
                         , indirect [L, R, L, R] 6
                         , indirect [R, R, R, R] 16
                         ]
-                    generateProof pureBackendIdentity []
+                    runPureTransaction word64Codecs
+                        $ generateProof StandaloneCSMTCol []
               in
                 mp `shouldBe` Just [(1, 2), (0, 1), (0, 3)]
     describe "verifyProof" $ do
@@ -94,15 +107,19 @@ spec = do
                     , indirect [R, R, R, R] 16
                     ]
                 (mp, r) = evalPureFromEmptyDB $ do
-                    insertInts values
-                    mp' <- generateProof pureBackendIdentity []
-                    r' <- queryCSMT pureBackendIdentity []
+                    insertWord64s values
+                    mp' <-
+                        runPureTransaction word64Codecs
+                            $ generateProof StandaloneCSMTCol []
+                    r' <-
+                        runPureTransaction word64Codecs
+                            $ query StandaloneCSMTCol []
                     return (mp', r')
               in
                 case mp of
                     Nothing -> error "expected a proof"
                     Just proof -> do
-                        foldProof (combineHash intHashing) values proof
+                        foldProof (combineHash word64Hashing) values proof
                             `shouldBe` r
         it "can verify completeness proof for random trees"
             $ property
@@ -110,14 +127,18 @@ spec = do
             $ \ks -> do
                 let values = zipWith indirect ks [1 ..]
                     (mp, r) = evalPureFromEmptyDB $ do
-                        insertInts values
-                        mp' <- generateProof pureBackendIdentity []
-                        r' <- queryCSMT pureBackendIdentity []
+                        insertWord64s values
+                        mp' <-
+                            runPureTransaction word64Codecs
+                                $ generateProof StandaloneCSMTCol []
+                        r' <-
+                            runPureTransaction word64Codecs
+                                $ query StandaloneCSMTCol []
                         return (mp', r')
                 case mp of
                     Nothing -> error "expected a proof"
                     Just proof -> do
-                        foldProof (combineHash intHashing) (sort values) proof
+                        foldProof (combineHash word64Hashing) (sort values) proof
                             `shouldBe` r
         it "can verify completeness proof for random trees of hashes"
             $ property
@@ -126,8 +147,12 @@ spec = do
                 let values = zipWith indirect ks (intHash <$> [1 ..])
                     (mp, r) = evalPureFromEmptyDB $ do
                         insertHashes values
-                        mp' <- generateProof pureBackendIdentity []
-                        r' <- queryCSMT pureBackendIdentity []
+                        mp' <-
+                            runPureTransaction hashCodecs
+                                $ generateProof StandaloneCSMTCol []
+                        r' <-
+                            runPureTransaction hashCodecs
+                                $ query StandaloneCSMTCol []
                         return (mp', r')
                 case mp of
                     Nothing -> error "expected a proof"

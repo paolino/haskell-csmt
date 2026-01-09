@@ -4,35 +4,27 @@ module CSMT.Backend.RocksDBSpec
 where
 
 import CSMT
-    ( Backend
-    , Proof
+    ( Proof
+    , Standalone (StandaloneCSMTCol, StandaloneKVCol)
+    , StandaloneCodecs
     , inserting
     , mkInclusionProof
     , verifyInclusionProof
     )
 import CSMT.Backend.RocksDB
-    ( RocksDB
-    , RunRocksDB (..)
+    ( RunRocksDB (..)
     , withRocksDB
     )
 import CSMT.Backend.RocksDB qualified as RocksDB
+import CSMT.Backend.Standalone (StandaloneCodecs (..))
 import CSMT.Deletion (deleting)
+import CSMT.Frontend.CLI.App (RunT (..), T)
 import CSMT.Hashes
     ( Hash
-    , byteStringToKey
-    , generateInclusionProof
+    , fromKVHashes
     , hashHashing
-    , insert
-    , mkHash
-    , queryKV
     )
 import CSMT.Hashes qualified as Hashes
-import CSMT.Interface
-    ( Indirect (..)
-    , Op (..)
-    , change
-    , queryCSMT
-    )
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.ByteString (ByteString)
@@ -40,6 +32,7 @@ import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as BC
 import Data.Foldable (traverse_)
 import Data.List (nub)
+import Database.KV.Transaction qualified as Transaction
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Hspec (Spec, around, describe, it, shouldBe)
@@ -53,35 +46,53 @@ import Test.QuickCheck
     , listOf1
     )
 
-rocksDBBackend :: Backend RocksDB ByteString ByteString Hash
-rocksDBBackend = RocksDB.rocksDBBackend mkHash
-
-tempDB :: (RunRocksDB -> IO a) -> IO a
+tempDB :: (RunT -> IO a) -> IO a
 tempDB action = withSystemTempDirectory "rocksdb-test"
     $ \dir -> do
         let path = dir </> "testdb"
-        withRocksDB path 1 1 action
+        withRocksDB path 1 1 $ \(RunRocksDB run) -> do
+            database <- run $ RocksDB.standaloneRocksDBDatabase rocksDBCodecs
+            action $ RunT $ \r -> run $ Transaction.run database r
 
-iM :: ByteString -> ByteString -> RocksDB ()
-iM = inserting rocksDBBackend hashHashing
+rocksDBCodecs :: StandaloneCodecs ByteString ByteString Hash
+rocksDBCodecs =
+    StandaloneCodecs
+        { keyCodec = id
+        , valueCodec = id
+        , nodeCodec = Hashes.isoHash
+        }
 
-dM :: ByteString -> RocksDB ()
-dM = deleting rocksDBBackend hashHashing
+iM :: ByteString -> ByteString -> T ()
+iM =
+    inserting
+        fromKVHashes
+        hashHashing
+        StandaloneKVCol
+        StandaloneCSMTCol
 
-pfM :: ByteString -> RocksDB (Maybe (Proof Hash))
-pfM = mkInclusionProof rocksDBBackend
+dM :: ByteString -> T ()
+dM =
+    deleting
+        fromKVHashes
+        hashHashing
+        StandaloneKVCol
+        StandaloneCSMTCol
 
-vpfM :: ByteString -> ByteString -> RocksDB Bool
+pfM :: ByteString -> T (Maybe (Proof Hash))
+pfM = mkInclusionProof fromKVHashes StandaloneCSMTCol
+
+vpfM :: ByteString -> ByteString -> T Bool
 vpfM k v = do
     mp <- pfM k
     case mp of
         Nothing -> pure False
-        Just p -> verifyInclusionProof rocksDBBackend hashHashing v p
+        Just p ->
+            verifyInclusionProof fromKVHashes StandaloneCSMTCol hashHashing v p
 
 testRandomFactsInASparseTree
-    :: RunRocksDB
+    :: RunT
     -> Property
-testRandomFactsInASparseTree (RunRocksDB run) =
+testRandomFactsInASparseTree (RunT run) =
     forAll (elements [128 .. 256])
         $ \n -> forAll (genSomePaths n)
             $ \keys -> forAll (listOf $ elements [0 .. length keys - 1])
@@ -110,62 +121,15 @@ spec = around tempDB $ do
     describe "RocksDB CSMT backend" $ do
         it "can initialize and close a db"
             $ \_run -> pure @IO ()
-        it "can insert a csmt node and retrieve it and delete it"
-            $ \(RunRocksDB run) -> run $ do
-                let v =
-                        Indirect
-                            { jump = []
-                            , value = mkHash "my-csmt-value"
-                            }
-                change rocksDBBackend [InsertCSMT [] v]
-                r <- rocksDBBackend `queryCSMT` []
-                liftIO $ r `shouldBe` Just v
-                change rocksDBBackend [DeleteCSMT []]
-                r2 <- rocksDBBackend `queryCSMT` []
-                liftIO $ r2 `shouldBe` Nothing
-        it "can insert and retrieve a key-value pair and delete it"
-            $ \(RunRocksDB run) -> run $ do
-                let k = "my-key"
-                    v = "my-value"
-                change rocksDBBackend [InsertKV k v]
-                r <- rocksDBBackend `queryKV` k
-                liftIO $ r `shouldBe` Just v
-                change rocksDBBackend [DeleteKV k]
-                r2 <- rocksDBBackend `queryKV` k
-                liftIO $ r2 `shouldBe` Nothing
-        it "cannot retrieve a non existent key"
-            $ \(RunRocksDB run) -> run $ do
-                change
-                    rocksDBBackend
-                    [ InsertCSMT
-                        (byteStringToKey "a")
-                        (Indirect [] (mkHash "v"))
-                    ]
-                r <- rocksDBBackend `queryCSMT` byteStringToKey "aa"
-                liftIO $ r `shouldBe` Nothing
-        it "can insert a key value with csmt" $ \(RunRocksDB run) -> run $ do
-            insert rocksDBBackend "my-csmt-key" "my-csmt-value"
-            mv <- queryKV rocksDBBackend "my-csmt-key"
-            liftIO $ mv `shouldBe` Just "my-csmt-value"
-            r <- generateInclusionProof rocksDBBackend "my-csmt-key"
-            case r of
-                Nothing -> error "expected inclusion proof"
-                Just pf -> do
-                    verified <-
-                        Hashes.verifyInclusionProof
-                            rocksDBBackend
-                            "my-csmt-value"
-                            pf
-                    liftIO $ verified `shouldBe` True
-        it "verifies a fact" $ \(RunRocksDB run) -> run $ do
+        it "verifies a fact" $ \(RunT run) -> run $ do
             iM "key1" "value1"
             r <- vpfM "key1" "value1"
             liftIO $ r `shouldBe` True
-        it "rejects an incorrect fact" $ \(RunRocksDB run) -> run $ do
+        it "rejects an incorrect fact" $ \(RunT run) -> run $ do
             iM "key2" "value2"
             r <- vpfM "key2" "wrongvalue"
             liftIO $ r `shouldBe` False
-        it "rejects a deleted fact" $ \(RunRocksDB run) -> run $ do
+        it "rejects a deleted fact" $ \(RunT run) -> run $ do
             iM "key3" "value3"
             dM "key3"
             r <- vpfM "key3" "value3"

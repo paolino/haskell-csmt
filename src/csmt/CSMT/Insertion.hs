@@ -9,16 +9,20 @@ module CSMT.Insertion
 where
 
 import CSMT.Interface
-    ( Backend (..)
-    , Direction (..)
+    ( Direction (..)
     , FromKV (..)
     , Hashing (..)
     , Indirect (..)
     , Key
-    , Op (..)
-    , QueryCSMT
     , compareKeys
     , opposite
+    )
+import Database.KV.Transaction
+    ( GCompare
+    , Selector
+    , Transaction
+    , insert
+    , query
     )
 
 -- A binary tree with a Key at each node
@@ -32,48 +36,48 @@ compose :: Direction -> Key -> Compose a -> Compose a -> Compose a
 compose L j left right = Compose j left right
 compose R j left right = Compose j right left
 
--- | Change a value into a CSMT
+-- | Insert a key-value pair into the CSMT structure
 inserting
-    :: Monad m
-    => Backend m k v a
-    -- ^ Backend interface of the CSMT
+    :: (Monad m, Ord k, GCompare d)
+    => FromKV k v a
     -> Hashing a
+    -> Selector d k v
+    -> Selector d Key (Indirect a)
     -> k
     -> v
-    -- ^ Hash to insert
-    -> m ()
-inserting (Backend i q _ FromKV{fromK, fromV}) hashing k v = do
-    c <- mkCompose q (fromK k) (fromV v)
-    i $ (<> [InsertKV k v]) . snd $ scanCompose hashing c
+    -> Transaction m cf d ops ()
+inserting FromKV{fromK, fromV} hashing kVCol csmtCol k v = do
+    insert kVCol k v
+    c <- mkCompose csmtCol (fromK k) (fromV v)
+    mapM_ (uncurry $ insert csmtCol) $ snd $ scanCompose hashing c
 
 -- Scan a Compose tree and produce the resulting hash and list of inserts
 scanCompose
-    :: Hashing a -> Compose a -> (Indirect a, [Op k v a])
+    :: Hashing a -> Compose a -> (Indirect a, [(Key, Indirect a)])
 scanCompose Hashing{combineHash} = go []
   where
-    go k (Leaf i) = (i, [InsertCSMT k i])
+    go k (Leaf i) = (i, [(k, i)])
     go k (Compose jump left right) =
         let k' = k <> jump
             (hl, ls) = go (k' <> [L]) left
             (hr, rs) = go (k' <> [R]) right
             value = combineHash hl hr
             i = Indirect{jump, value}
-        in  (i, ls <> rs <> [InsertCSMT k i])
+        in  (i, ls <> rs <> [(k, i)])
 
 -- Build a Compose tree for inserting a value at a given key
 mkCompose
-    :: forall a m
-     . Monad m
-    => QueryCSMT m a
+    :: forall a d ops cf m
+     . (Monad m, GCompare d)
+    => Selector d Key (Indirect a)
     -> Key
     -> a
-    -> m (Compose a)
-mkCompose get key h = go key [] pure
+    -> Transaction m cf d ops (Compose a)
+mkCompose csmtCol key h = go key [] pure
   where
-    go :: Key -> Key -> (Compose a -> m (Compose a)) -> m (Compose a)
     go [] _ cont = cont $ Leaf $ Indirect [] h
     go target current cont = do
-        mi <- get current
+        mi <- query csmtCol current
         case mi of
             Nothing -> cont $ Leaf $ Indirect target h
             Just Indirect{jump, value} -> do
@@ -81,7 +85,7 @@ mkCompose get key h = go key [] pure
                 case (other, us) of
                     ([], []) -> cont $ Leaf $ Indirect common h
                     ([], z : zs) -> do
-                        mov <- get (current <> common <> [opposite z])
+                        mov <- query csmtCol (current <> common <> [opposite z])
                         case mov of
                             Nothing -> error "a jump pointed to a non-existing node"
                             Just i ->

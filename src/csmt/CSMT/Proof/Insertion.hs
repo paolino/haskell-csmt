@@ -10,8 +10,7 @@ module CSMT.Proof.Insertion
 where
 
 import CSMT.Interface
-    ( Backend (Backend, fromKV, queryCSMT)
-    , Direction (..)
+    ( Direction (..)
     , FromKV (..)
     , Hashing (..)
     , Indirect (..)
@@ -24,6 +23,12 @@ import Data.Foldable (Foldable (..))
 import Data.List (isPrefixOf)
 
 import Control.Monad (guard)
+import Database.KV.Transaction
+    ( GCompare
+    , Selector
+    , Transaction
+    , query
+    )
 
 data ProofStep a = ProofStep
     { stepDirection :: Direction
@@ -40,22 +45,23 @@ data Proof a = Proof
 
 -- | Collect a proof for the presence of a key in the CSMT
 mkInclusionProof
-    :: Monad m
-    => Backend m k v a
+    :: (Monad m, GCompare d)
+    => FromKV k v a
+    -> Selector d Key (Indirect a)
     -> k
-    -> m (Maybe (Proof a))
-mkInclusionProof Backend{queryCSMT, fromKV} k = runMaybeT $ do
-    let key = fromK fromKV k
-    Indirect jump _ <- MaybeT $ queryCSMT []
+    -> Transaction m cf d ops (Maybe (Proof a))
+mkInclusionProof FromKV{fromK} sel k = runMaybeT $ do
+    let key = fromK k
+    Indirect jump _ <- MaybeT $ query sel []
     guard $ isPrefixOf jump key
     rs <- go jump $ drop (length jump) key
     pure $ Proof{proofSteps = reverse rs, proofRootJump = jump}
   where
     go _ [] = pure []
     go u (x : ks) = do
-        Indirect jump _ <- MaybeT $ queryCSMT (u <> [x])
+        Indirect jump _ <- MaybeT $ query sel (u <> [x])
         guard $ isPrefixOf jump ks
-        stepSibiling <- MaybeT $ queryCSMT (u <> [opposite x])
+        stepSibiling <- MaybeT $ query sel (u <> [opposite x])
         let step =
                 ProofStep
                     { stepDirection = x
@@ -82,15 +88,16 @@ foldProof hashing value Proof{proofSteps, proofRootJump} =
 
 -- | Verify a proof of given the included value
 verifyInclusionProof
-    :: (Eq a, Monad m)
-    => Backend m k v a
+    :: (Eq a, Monad m, GCompare d)
+    => FromKV k v a
+    -> Selector d Key (Indirect a)
     -> Hashing a
     -> v
     -> Proof a
-    -> m Bool
-verifyInclusionProof csmt hashing v proof = do
-    let value = fromV (fromKV csmt) v
-    mv <- queryCSMT csmt []
+    -> Transaction m cf d ops Bool
+verifyInclusionProof FromKV{fromV} sel hashing v proof = do
+    let value = fromV v
+    mv <- query sel []
     pure $ case mv of
         Just rootValue ->
             rootHash hashing rootValue == foldProof hashing value proof

@@ -1,25 +1,33 @@
-module CSMT.Frontend.CLI.App (main) where
+module CSMT.Frontend.CLI.App
+    ( main
+    , T
+    , RunT (..)
+    ) where
 
 import CSMT.Backend.RocksDB
-    ( RunRocksDB (RunRocksDB)
+    ( RocksDB
+    , RunRocksDB (RunRocksDB)
+    , standaloneRocksDBDatabase
     , withRocksDB
     )
-import CSMT.Backend.RocksDB qualified as RocksDB
+import CSMT.Backend.Standalone
+    ( Standalone (..)
+    , StandaloneCodecs (..)
+    )
 import CSMT.Hashes
     ( Hash
     , byteStringToKey
     , delete
+    , fromKVHashes
     , generateInclusionProof
     , insert
-    , mkHash
-    , queryKV
+    , isoHash
     , renderHash
     , root
     , verifyInclusionProof
     )
 import CSMT.Interface
-    ( Backend (queryCSMT)
-    , Indirect (..)
+    ( Indirect (..)
     , Key
     )
 import CSMT.Interface qualified as I
@@ -33,6 +41,9 @@ import Data.ByteArray.Encoding
     )
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as BC
+import Database.KV.Transaction (Transaction, query)
+import Database.KV.Transaction qualified as Transaction
+import Database.RocksDB (BatchOp, ColumnFamily)
 import OptEnvConf
     ( Parser
     , argument
@@ -143,7 +154,8 @@ mkPrompt :: Bool -> String -> Prompt
 mkPrompt isPiped cmd = if isPiped then Nothing else Just (BC.pack cmd)
 
 printHash :: Prompt -> ByteString -> IO ()
-printHash (Just prompt) what = BC.putStrLn . ((prompt <> ": ") <>) . convertToBase Base64 $ what
+printHash (Just prompt) what =
+    BC.putStrLn . ((prompt <> ": ") <>) . convertToBase Base64 $ what
 printHash Nothing what = BC.putStrLn . convertToBase Base64 $ what
 
 readHash :: ByteString -> Maybe ByteString
@@ -151,26 +163,32 @@ readHash bs = case convertFromBase Base64 bs of
     Left _ -> Nothing
     Right h -> Just h
 
-rocksDBBackend :: Backend RocksDB.RocksDB ByteString ByteString Hash
-rocksDBBackend = RocksDB.rocksDBBackend mkHash
-
 data Output
     = Binary String ByteString
     | Text ByteString
     | Node (Indirect Hash)
     | ErrorMsg Error
 
-core :: Bool -> RunRocksDB -> String -> IO ()
-core isPiped (RunRocksDB run) l' = do
+type T =
+    Transaction
+        RocksDB
+        ColumnFamily
+        (Standalone ByteString ByteString Hash)
+        BatchOp
+
+newtype RunT = RunT (forall a. T a -> IO a)
+
+core :: Bool -> RunT -> String -> IO ()
+core isPiped (RunT run) l' = do
     r <- case parseCommand $ BC.pack l' of
         Just (I k v) -> do
-            run $ insert rocksDBBackend k v
+            run $ insert fromKVHashes StandaloneKVCol StandaloneCSMTCol k v
             pure $ ErrorMsg AddedKey
         Just (D k) -> do
-            run $ delete rocksDBBackend k
+            run $ delete fromKVHashes StandaloneKVCol StandaloneCSMTCol k
             pure $ ErrorMsg DeletedKey
         Just (Q k) -> do
-            r <- run $ generateInclusionProof rocksDBBackend k
+            r <- run $ generateInclusionProof fromKVHashes StandaloneCSMTCol k
             pure $ case r of
                 Just proof -> Binary "proof" proof
                 Nothing -> ErrorMsg NoProofFound
@@ -178,23 +196,25 @@ core isPiped (RunRocksDB run) l' = do
             case mk of
                 Nothing -> pure $ ErrorMsg InvalidKeyFormat
                 Just k -> do
-                    mv <- run $ queryCSMT rocksDBBackend k
+                    mv <- run $ query StandaloneCSMTCol k
                     pure $ case mv of
                         Just v -> Node v
                         Nothing -> ErrorMsg NoNodeFound
         Just R -> do
-            r <- run $ root rocksDBBackend
+            r <- run $ root StandaloneCSMTCol
             pure $ case r of
                 Just rootHash -> Binary "root" rootHash
                 Nothing -> ErrorMsg TreeEmpty
         Just (V value proof) -> do
             case readHash proof of
                 Just decoded -> do
-                    r <- run $ verifyInclusionProof rocksDBBackend value decoded
+                    r <-
+                        run
+                            $ verifyInclusionProof fromKVHashes StandaloneCSMTCol value decoded
                     pure $ ErrorMsg $ if r then Valid else Invalid
                 Nothing -> pure $ ErrorMsg InvalidProofFormat
         Just (W k) -> do
-            mv <- run $ queryKV rocksDBBackend k
+            mv <- run $ query StandaloneKVCol k
             pure $ case mv of
                 Just v -> Text v
                 Nothing -> ErrorMsg KeyNotFound
@@ -266,20 +286,31 @@ optionsParser =
         <*> parseCSMTMaxFiles
         <*> parseKVMaxFiles
 
+codecs :: StandaloneCodecs ByteString ByteString Hash
+codecs =
+    StandaloneCodecs
+        { keyCodec = id
+        , valueCodec = id
+        , nodeCodec = isoHash
+        }
+
 main :: IO ()
 main = do
     Options{optDbPath, optCSMTMaxFiles, optKVMaxFiles} <-
         runParser version "csmt" optionsParser
     hSetBuffering stdout LineBuffering
     hSetBuffering stdin LineBuffering
-    withRocksDB optDbPath optCSMTMaxFiles optKVMaxFiles $ \run -> do
+    withRocksDB optDbPath optCSMTMaxFiles optKVMaxFiles $ \(RunRocksDB run) -> do
+        runT <- do
+            database <- run $ standaloneRocksDBDatabase codecs
+            pure $ RunT $ run . Transaction.run database
         isPiped <- checkPipeline
         if isPiped
             then fix $ \loop -> do
                 eof <- isEOF
                 unless eof $ do
                     line <- BC.getLine
-                    core isPiped run (BC.unpack line)
+                    core isPiped runT (BC.unpack line)
                     loop
             else do
                 putStrLn helpInteractive
@@ -288,7 +319,7 @@ main = do
                     case mlline of
                         Nothing -> return ()
                         Just line -> do
-                            lift $ core isPiped run line
+                            lift $ core isPiped runT line
                             loop
 
 checkPipeline :: IO Bool

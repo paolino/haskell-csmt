@@ -9,14 +9,19 @@ module CSMT.Proof.Completeness
 where
 
 import CSMT.Interface
-    ( Backend (Backend, queryCSMT)
-    , Direction (..)
+    ( Direction (..)
     , Indirect (..)
     , Key
     , compareKeys
     , prefix
     )
 import Data.Map.Strict qualified as Map
+import Database.KV.Transaction
+    ( GCompare
+    , Selector
+    , Transaction
+    , query
+    )
 
 -- | The input for a program to compute the root of a CSMT given all the values
 type CompletenessProof = [(Int, Int)]
@@ -59,11 +64,15 @@ foldProof compose values = go (Map.fromList $ zip [0 ..] values)
 data TreeWithDifferentLengthsError = TreeWithDifferentLengthsError
     deriving (Show)
 
-collectValues :: Monad m => Backend m k v a -> Key -> m [Indirect a]
-collectValues Backend{queryCSMT} = go
+collectValues
+    :: (Monad m, GCompare d)
+    => Selector d Key (Indirect a)
+    -> Key
+    -> Transaction m cf d op [Indirect a]
+collectValues sel = go
   where
     go key = do
-        mi <- queryCSMT key
+        mi <- query sel key
         case mi of
             Nothing -> pure []
             Just indirect@(Indirect jump _) -> do
@@ -79,16 +88,19 @@ collectValues Backend{queryCSMT} = go
                                     )
 
 generateProof
-    :: forall m k v a
-     . Monad m
-    => Backend m k v a
+    :: forall m d a cf op
+     . (Monad m, GCompare d)
+    => Selector d Key (Indirect a)
     -> Key
-    -> m (Maybe CompletenessProof)
-generateProof Backend{queryCSMT} = fmap (fmap fst) . go 0
+    -> Transaction m cf d op (Maybe CompletenessProof)
+generateProof sel = fmap (fmap fst) . go 0
   where
-    go :: Int -> Key -> m (Maybe (CompletenessProof, (Int, Int)))
+    go
+        :: Int
+        -> Key
+        -> Transaction m cf d op (Maybe (CompletenessProof, (Int, Int)))
     go n key = do
-        mi <- queryCSMT key
+        mi <- query sel key
         case mi of
             Nothing -> pure Nothing
             Just (Indirect jump _) -> do

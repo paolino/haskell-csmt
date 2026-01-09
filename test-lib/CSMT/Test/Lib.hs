@@ -3,29 +3,29 @@
 
 module CSMT.Test.Lib
     ( delete
-    , deleteInt
+    , deleteWord64
     , deleteM
-    , deleteMInt
+    , deleteMWord64
     , genKey
     , genPaths
     , genSomePaths
     , node
     , insert
     , inserted
-    , insertInt
+    , insertWord64
     , insertM
-    , insertMInt
+    , insertMWord64
     , intHash
-    , intHashing
+    , word64Hashing
     , mkDeletionPath
     , proofM
     -- , summed
     , verifyM
     , verifyMHash
-    , verifyMInt
+    , verifyMWord64
     , verifyMList
     , listHashing
-    , keyToListOfInt
+    , keyToListOfWord64
     , insertMHash
     , insertMList
     , identityFromKV
@@ -33,44 +33,62 @@ module CSMT.Test.Lib
     , list
     , ListOf
     , evalPure
-    , pureBackendIdentity
     , evalPureFromEmptyDB
     , indirect
     , runPureFromEmptyDB
     , insertIndirectM
-    , insertInts
+    , insertWord64s
     , insertHashes
     , manyRandomPaths
+    , word64Codecs
+    , hashCodecs
+    , listOfWord64Codecs
     )
 where
 
 import CSMT
     ( Direction (L, R)
     , Hashing
-    , InMemoryDB
     , Indirect (..)
     , Key
     , Proof
+    , Standalone (..)
+    , StandaloneCodecs (..)
+    , inserting
+    , keyPrism
+    , mkInclusionProof
+    , verifyInclusionProof
+    )
+import CSMT.Backend.Pure
+    ( InMemoryDB
     , Pure
     , emptyInMemoryDB
-    , inserting
-    , mkInclusionProof
-    , pureBackend
-    , queryCSMT
+    , pureDatabase
     , runPure
-    , verifyInclusionProof
     )
 import CSMT.Deletion
     ( DeletionPath (..)
     , deleting
     , newDeletionPath
     )
-import CSMT.Hashes (Hash, hashHashing, mkHash)
-import CSMT.Interface (Backend, FromKV (..), Hashing (..))
+import CSMT.Hashes (Hash, hashHashing, isoHash, mkHash)
+import CSMT.Interface (FromKV (..), Hashing (..))
+import Control.Lens (Prism', prism')
+import Control.Monad (replicateM)
 import Control.Monad.Free (Free (..), liftF)
+import Data.ByteString (ByteString)
 import Data.Foldable (Foldable (..), foldl')
 import Data.List (nub)
+import Data.Serialize
+    ( getWord16be
+    , getWord64be
+    , putWord16be
+    , putWord64be
+    )
+import Data.Serialize.Extra (evalGetM, evalPutM)
 import Data.String (IsString (..))
+import Data.Word (Word64)
+import Database.KV.Transaction (run)
 import Test.QuickCheck
     ( listOf
     , listOf1
@@ -82,117 +100,196 @@ import Test.QuickCheck.Gen (Gen, elements)
 identityFromKV :: FromKV Key a a
 identityFromKV = FromKV{fromK = id, fromV = id}
 
-intHashing :: Hashing Int
-intHashing =
+word64Hashing :: Hashing Word64
+word64Hashing =
     Hashing
-        { rootHash = \(Indirect k v) -> keyToInt k + v
+        { rootHash = \(Indirect k v) -> keyToWord64 k + v
         , combineHash = \(Indirect kl l) (Indirect kr r) ->
-            keyToInt kl + keyToInt kr + l + r
+            keyToWord64 kl + keyToWord64 kr + l + r
         }
+
 insert
     :: Ord k
-    => FromKV k v a
+    => StandaloneCodecs k v a
+    -> FromKV k v a
     -> Hashing a
-    -> InMemoryDB k v a
+    -> InMemoryDB
     -> k
     -> v
-    -> InMemoryDB k v a
-insert fromKV hashing m k v = snd $ runPure m $ insertM fromKV hashing k v
+    -> InMemoryDB
+insert codecs fromKV hashing m k v =
+    snd $ runPure m $ insertM codecs fromKV hashing k v
 
 delete
     :: Ord k
-    => FromKV k v a
+    => StandaloneCodecs k v a
+    -> FromKV k v a
     -> Hashing a
-    -> InMemoryDB k v a
+    -> InMemoryDB
     -> k
-    -> InMemoryDB k v a
-delete fromKV hashing m k = snd $ runPure m $ deleteM fromKV hashing k
+    -> InMemoryDB
+delete codecs fromKV hashing m k =
+    snd
+        $ runPure m
+        $ deleteM codecs fromKV hashing k
 
-deleteInt :: InMemoryDB Key Int Int -> Key -> InMemoryDB Key Int Int
-deleteInt = delete identityFromKV intHashing
+word64Codecs :: StandaloneCodecs Key Word64 Word64
+word64Codecs =
+    StandaloneCodecs
+        { keyCodec = keyPrism
+        , valueCodec = word64Prism
+        , nodeCodec = word64Prism
+        }
 
-insertInt
-    :: InMemoryDB Key Int Int -> Key -> Int -> InMemoryDB Key Int Int
-insertInt = insert identityFromKV intHashing
+deleteWord64 :: InMemoryDB -> Key -> InMemoryDB
+deleteWord64 = delete word64Codecs identityFromKV word64Hashing
 
+insertWord64
+    :: InMemoryDB -> Key -> Word64 -> InMemoryDB
+insertWord64 = insert word64Codecs identityFromKV word64Hashing
 insertM
-    :: Ord k => FromKV k v a -> Hashing a -> k -> v -> Pure k v a ()
-insertM = inserting . pureBackend
+    :: Ord k
+    => StandaloneCodecs k v a
+    -> FromKV k v a
+    -> Hashing a
+    -> k
+    -> v
+    -> Pure ()
+insertM codecs fromKV hashing k v =
+    run (pureDatabase codecs)
+        $ inserting fromKV hashing StandaloneKVCol StandaloneCSMTCol k v
 
-deleteM :: Ord k => FromKV k v a -> Hashing a -> k -> Pure k v a ()
-deleteM = deleting . pureBackend
+word64Prism :: Prism' ByteString Word64
+word64Prism = prism' encode decode
+  where
+    encode :: Word64 -> ByteString
+    encode = evalPutM . putWord64be
+    decode :: ByteString -> Maybe Word64
+    decode = evalGetM getWord64be
 
-insertMInt :: Key -> Int -> Pure Key Int Int ()
-insertMInt = insertM identityFromKV intHashing
+deleteM
+    :: Ord k
+    => StandaloneCodecs k v a
+    -> FromKV k v a
+    -> Hashing a
+    -> k
+    -> Pure ()
+deleteM codecs fromKV hashing k =
+    run (pureDatabase codecs)
+        $ deleting fromKV hashing StandaloneKVCol StandaloneCSMTCol k
 
-insertMHash :: Key -> Hash -> Pure Key Hash Hash ()
-insertMHash = insertM identityFromKV hashHashing
+insertMWord64 :: Key -> Word64 -> Pure ()
+insertMWord64 = insertM word64Codecs identityFromKV word64Hashing
 
-insertMList :: Key -> [Int] -> Pure Key [Int] [Int] ()
-insertMList = insertM identityFromKV listHashing
+hashCodecs :: StandaloneCodecs Key Hash Hash
+hashCodecs =
+    StandaloneCodecs
+        { keyCodec = keyPrism
+        , valueCodec = isoHash
+        , nodeCodec = isoHash
+        }
 
-keyToInt :: Key -> Int
-keyToInt = foldl' (\acc d -> acc * 2 + dirToBit d) 0
+insertMHash :: Key -> Hash -> Pure ()
+insertMHash = insertM hashCodecs identityFromKV hashHashing
+
+insertMList :: Key -> [Word64] -> Pure ()
+insertMList = insertM listOfWord64Codecs identityFromKV listHashing
+
+keyToWord64 :: Key -> Word64
+keyToWord64 = foldl' (\acc d -> acc * 2 + dirToBit d) 0
   where
     dirToBit L = 0
     dirToBit R = 1
 
-deleteMInt :: Key -> Pure Key Int Int ()
-deleteMInt = deleteM identityFromKV intHashing
+listOfWord64Codecs :: StandaloneCodecs Key [Word64] [Word64]
+listOfWord64Codecs =
+    StandaloneCodecs
+        { keyCodec = keyPrism
+        , valueCodec = listOfWord64Prism
+        , nodeCodec = listOfWord64Prism
+        }
 
-proofM :: Ord k => FromKV k v a -> k -> Pure k v a (Maybe (Proof a))
-proofM = mkInclusionProof . pureBackend
+listOfWord64Prism :: Prism' ByteString [Word64]
+listOfWord64Prism = prism' encode decode
+  where
+    encode :: [Word64] -> ByteString
+    encode xs = evalPutM $ do
+        putWord16be $ fromIntegral (length xs)
+        mapM putWord64be xs
+
+    decode :: ByteString -> Maybe [Word64]
+    decode = evalGetM $ do
+        len <- fromIntegral <$> getWord16be
+        replicateM len getWord64be
+
+deleteMWord64 :: Key -> Pure ()
+deleteMWord64 = deleteM word64Codecs identityFromKV word64Hashing
+
+proofM
+    :: StandaloneCodecs k v a
+    -> FromKV k v a
+    -> k
+    -> Pure (Maybe (Proof a))
+proofM codecs fromKV k =
+    run (pureDatabase codecs)
+        $ mkInclusionProof fromKV StandaloneCSMTCol k
 
 verifyM
-    :: (Eq a, Ord k)
-    => FromKV k v a
+    :: Eq a
+    => StandaloneCodecs k v a
+    -> FromKV k v a
     -> Hashing a
     -> k
     -> v
-    -> Pure k v a Bool
-verifyM fromKV hashing k v = do
-    mp <- proofM fromKV k
+    -> Pure Bool
+verifyM codecs fromKV hashing k v = do
+    mp <- proofM codecs fromKV k
     case mp of
         Nothing -> pure False
-        Just p -> verifyInclusionProof (pureBackend fromKV) hashing v p
+        Just p ->
+            run (pureDatabase codecs)
+                $ verifyInclusionProof fromKV StandaloneCSMTCol hashing v p
 
-verifyMInt :: Key -> Int -> Pure Key Int Int Bool
-verifyMInt = verifyM identityFromKV intHashing
+verifyMWord64 :: Key -> Word64 -> Pure Bool
+verifyMWord64 = verifyM word64Codecs identityFromKV word64Hashing
 
-verifyMList :: Key -> [Int] -> Pure Key [Int] [Int] Bool
-verifyMList = verifyM identityFromKV listHashing
+verifyMList :: Key -> [Word64] -> Pure Bool
+verifyMList = verifyM listOfWord64Codecs identityFromKV listHashing
 
-keyToListOfInt :: Key -> [Int]
-keyToListOfInt [] = [-1]
-keyToListOfInt xs = flip fmap xs $ \case
+keyToListOfWord64 :: Key -> [Word64]
+keyToListOfWord64 xs = flip fmap xs $ \case
     L -> 0
     R -> 1
 
-listHashing :: Hashing [Int]
+listHashing :: Hashing [Word64]
 listHashing =
     Hashing
-        { rootHash = \(Indirect k v) -> keyToListOfInt k <> v
+        { rootHash = \(Indirect k v) -> keyToListOfWord64 k <> v
         , combineHash = \(Indirect kl l) (Indirect kr r) ->
-            keyToListOfInt kl <> l <> keyToListOfInt kr <> r
+            keyToListOfWord64 kl <> l <> keyToListOfWord64 kr <> r
         }
-verifyMHash :: Key -> Hash -> Pure Key Hash Hash Bool
-verifyMHash = verifyM identityFromKV hashHashing
+verifyMHash :: Key -> Hash -> Pure Bool
+verifyMHash = verifyM hashCodecs identityFromKV hashHashing
 
 node :: Key -> a -> Indirect a
 node jump value = Indirect{jump, value}
 
-intHash :: Int -> Hash
+intHash :: Word64 -> Hash
 intHash = mkHash . fromString . show
 
 inserted
     :: (Foldable t, Ord k)
-    => FromKV k v a
+    => StandaloneCodecs k v a
+    -> FromKV k v a
     -> Hashing a
     -> t (k, v)
-    -> InMemoryDB k v a
-inserted fromKV hashing = foldl' (\m (k, v) -> insert fromKV hashing m k v) emptyInMemoryDB
+    -> InMemoryDB
+inserted codecs fromKV hashing =
+    foldl'
+        (\m (k, v) -> insert codecs fromKV hashing m k v)
+        emptyInMemoryDB
 
-allPaths :: Int -> [Key]
+allPaths :: Word64 -> [Key]
 allPaths 0 = [[]]
 allPaths c = do
     p <- allPaths (c - 1)
@@ -201,10 +298,10 @@ allPaths c = do
 genKey :: Gen Key
 genKey = listOf $ elements [L, R]
 
-genPaths :: Int -> Gen [Key]
+genPaths :: Word64 -> Gen [Key]
 genPaths n = shuffle (allPaths n)
 
-genSomePaths :: Int -> Gen [Key]
+genSomePaths :: Word64 -> Gen [Key]
 genSomePaths n = fmap nub <$> listOf1 $ do
     let go 0 = return []
         go c = do
@@ -214,15 +311,15 @@ genSomePaths n = fmap nub <$> listOf1 $ do
     go n
 
 mkDeletionPath
-    :: Ord k
-    => FromKV k v a
-    -> InMemoryDB k v a
+    :: StandaloneCodecs k v a
+    -> InMemoryDB
     -> Key
     -> Maybe (DeletionPath a)
-mkDeletionPath fromKV s =
+mkDeletionPath codecs s k =
     fst
         . runPure s
-        . newDeletionPath (queryCSMT $ pureBackend fromKV)
+        $ run (pureDatabase codecs)
+        $ newDeletionPath StandaloneCSMTCol k
 
 data List e a
     = Cons e a
@@ -237,30 +334,35 @@ list :: ListOf a () -> [a]
 list (Pure _) = []
 list (Free (Cons x xs)) = x : list xs
 
-evalPure :: InMemoryDB k v a -> Pure k v a b -> b
+evalPure :: InMemoryDB -> Pure b -> b
 evalPure db p = fst $ runPure db p
 
-pureBackendIdentity :: Backend (Pure Key v v) Key v v
-pureBackendIdentity = pureBackend identityFromKV
+-- pureBackendIdentity :: Backend (Pure Key v v) Key v v
+-- pureBackendIdentity = pureBackend identityFromKV
 
-evalPureFromEmptyDB :: Pure k v a b -> b
+evalPureFromEmptyDB :: Pure b -> b
 evalPureFromEmptyDB = evalPure emptyInMemoryDB
 
 runPureFromEmptyDB
-    :: Pure k v a b -> (b, InMemoryDB k v a)
+    :: Pure b -> (b, InMemoryDB)
 runPureFromEmptyDB = runPure emptyInMemoryDB
 
 indirect :: Key -> a -> Indirect a
 indirect = Indirect
 
-insertIndirectM :: Hashing a -> Indirect a -> Pure Key a a ()
-insertIndirectM hashing (Indirect k v) = insertM identityFromKV hashing k v
+insertIndirectM
+    :: StandaloneCodecs Key a a
+    -> Hashing a
+    -> Indirect a
+    -> Pure ()
+insertIndirectM codecs hashing (Indirect k v) =
+    insertM codecs identityFromKV hashing k v
 
-insertInts :: [Indirect Int] -> Pure Key Int Int ()
-insertInts = mapM_ $ insertIndirectM intHashing
+insertWord64s :: [Indirect Word64] -> Pure ()
+insertWord64s = mapM_ $ insertIndirectM word64Codecs word64Hashing
 
-insertHashes :: [Indirect Hash] -> Pure Key Hash Hash ()
-insertHashes = mapM_ $ insertIndirectM hashHashing
+insertHashes :: [Indirect Hash] -> Pure ()
+insertHashes = mapM_ $ insertIndirectM hashCodecs hashHashing
 
 manyRandomPaths :: Gen [Key]
 manyRandomPaths = scale (* 10) $ genSomePaths 256

@@ -16,16 +16,18 @@ module CSMT.Hashes
     , hashHashing
     , keyToHash
     , byteStringToKey
-    , queryKV
+    , isoHash
+    , fromKVHashes
     )
 where
 
 import CSMT.Deletion (deleting)
 import CSMT.Insertion (inserting)
 import CSMT.Interface
-    ( Backend
-    , Direction (..)
+    ( Direction (..)
+    , FromKV (..)
     , Hashing (..)
+    , Indirect
     , Key
     , getDirection
     , getIndirect
@@ -37,11 +39,12 @@ import CSMT.Interface
 import CSMT.Interface qualified as Interface
 import CSMT.Proof.Insertion (Proof (..), ProofStep (..))
 import CSMT.Proof.Insertion qualified as Proof
+import Control.Lens (Iso', iso)
 import Control.Monad (forM_, replicateM)
 import Crypto.Hash (Blake2b_256, hash)
 import Data.Bits (Bits (..))
 import Data.ByteArray (ByteArray, ByteArrayAccess, convert)
-import Data.ByteArray.Encoding
+import Data.ByteArray.Encoding (Base (Base64), convertToBase)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as BC
@@ -54,6 +57,7 @@ import Data.Serialize
     )
 import Data.Serialize.Extra (evalPutM)
 import Data.Word (Word8)
+import Database.KV.Transaction (GCompare, Selector, Transaction)
 
 newtype Hash = Hash ByteString
     deriving
@@ -89,22 +93,23 @@ keyToHash :: Key -> Hash
 keyToHash = mkHash . evalPutM . putKey
 
 insert
-    :: Monad m
-    => Backend m ByteString ByteString Hash
-    -> ByteString
-    -> ByteString
-    -> m ()
+    :: (Monad m, Ord k, GCompare d)
+    => FromKV k v Hash
+    -> Selector d k v
+    -> Selector d Key (Indirect Hash)
+    -> k
+    -> v
+    -> Transaction m cf d ops ()
 insert csmt = inserting csmt hashHashing
 
 delete
-    :: Monad m => Backend m ByteString ByteString Hash -> ByteString -> m ()
+    :: (Monad m, Ord k, GCompare d)
+    => FromKV k v Hash
+    -> Selector d k v
+    -> Selector d Key (Indirect Hash)
+    -> k
+    -> Transaction m cf d ops ()
 delete csmt = deleting csmt hashHashing
-
-queryKV
-    :: Backend m ByteString ByteString Hash
-    -> ByteString
-    -> m (Maybe ByteString)
-queryKV = Interface.queryKV
 
 byteStringToKey :: ByteString -> Key
 byteStringToKey bs = concatMap byteToDirections (B.unpack bs)
@@ -112,7 +117,10 @@ byteStringToKey bs = concatMap byteToDirections (B.unpack bs)
 byteToDirections :: Word8 -> Key
 byteToDirections byte = [if testBit byte i then R else L | i <- [7, 6 .. 0]]
 
-root :: Monad m => Backend m k v Hash -> m (Maybe ByteString)
+root
+    :: (Monad m, GCompare d)
+    => Selector d Key (Indirect Hash)
+    -> Transaction m cf d ops (Maybe ByteString)
 root csmt = do
     mi <- Interface.root hashHashing csmt
     case mi of
@@ -151,22 +159,34 @@ parseProof bs =
         Right pf -> Just pf
 
 generateInclusionProof
-    :: Monad m
-    => Backend m ByteString v Hash
-    -> ByteString
-    -> m (Maybe ByteString)
-generateInclusionProof csmt k = do
-    mp <- Proof.mkInclusionProof csmt k
+    :: (Monad m, GCompare d)
+    => FromKV k v Hash
+    -> Selector d Key (Indirect Hash)
+    -> k
+    -> Transaction m cf d ops (Maybe ByteString)
+generateInclusionProof csmt sel k = do
+    mp <- Proof.mkInclusionProof csmt sel k
     pure $ fmap renderProof mp
 
 verifyInclusionProof
-    :: Monad m
-    => Backend m k ByteString Hash
+    :: (Monad m, GCompare d)
+    => FromKV k v Hash
+    -> Selector d Key (Indirect Hash)
+    -> v
     -> ByteString
-    -> ByteString
-    -> m Bool
-verifyInclusionProof csmt value proofBs = do
+    -> Transaction m cf d ops Bool
+verifyInclusionProof csmt sel value proofBs = do
     case parseProof proofBs of
         Nothing -> pure False
         Just proof -> do
-            Proof.verifyInclusionProof csmt hashHashing value proof
+            Proof.verifyInclusionProof csmt sel hashHashing value proof
+
+isoHash :: Iso' ByteString Hash
+isoHash = iso Hash renderHash
+
+fromKVHashes :: FromKV ByteString ByteString Hash
+fromKVHashes =
+    FromKV
+        { fromK = byteStringToKey
+        , fromV = mkHash
+        }
