@@ -56,6 +56,7 @@ library
     CSMT
     CSMT.Backend.Pure
     CSMT.Backend.RocksDB
+    CSMT.Backend.Standalone
     CSMT.Deletion
     CSMT.Frontend.CLI.App
     CSMT.Hashes
@@ -72,13 +73,18 @@ library
     , cereal
     , containers
     , crypton
+    , csmt:rocksdb-transactions
+    , dependent-map
+    , dependent-sum
+    , exceptions
     , haskeline
+    , lens
     , memory
     , opt-env-conf
     , rocksdb-haskell-jprupp
     , transformers
 
-  hs-source-dirs:   src
+  hs-source-dirs:   src/csmt/
   default-language: Haskell2010
   other-modules:    Paths_csmt
 
@@ -118,8 +124,12 @@ library test-lib
   exposed-modules:  CSMT.Test.Lib
   build-depends:
     , base
+    , bytestring
+    , cereal
     , csmt
+    , csmt:rocksdb-transactions
     , free
+    , lens
     , QuickCheck
 
   hs-source-dirs:   test-lib
@@ -135,16 +145,23 @@ test-suite unit-tests
     , cereal
     , containers
     , csmt
+    , csmt:rocksdb-transactions
     , csmt:test-lib
+    , data-default
+    , dependent-map
+    , dependent-sum
     , filepath
     , hspec
+    , lens
     , QuickCheck
+    , rocksdb-haskell-jprupp
     , temporary
 
   build-tool-depends: hspec-discover:hspec-discover
   type:               exitcode-stdio-1.0
   main-is:            main.hs
   other-modules:
+    CSMT.Backend.RocksDB.TransactionSpec
     CSMT.Backend.RocksDBSpec
     CSMT.DeletionSpec
     CSMT.HashesSpec
@@ -164,7 +181,20 @@ benchmark bench
     , base
     , bytestring
     , csmt
+    , csmt:rocksdb-transactions
     , deepseq
     , filepath
     , miniterion
     , temporary
+
+executable space-leak
+  import:           warnings
+  ghc-options:      -O2
+  main-is:          src/csmt/CSMT/Frontend/CLI/SpaceLeak.hs
+  build-depends:
+    , base
+    , bytestring
+    , csmt
+    , csmt:rocksdb-transactions
+
+  default-language: Haskell2010

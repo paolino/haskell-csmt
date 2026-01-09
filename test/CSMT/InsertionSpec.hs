@@ -5,40 +5,40 @@ where
 
 import CSMT
     ( Direction (L, R)
-    , InMemoryDB (inMemoryCSMT)
     , Indirect
     , Key
-    , Pure
+    )
+import CSMT.Backend.Pure
+    ( Pure
     , emptyInMemoryDB
-    , inMemoryCSMT
+    , inMemoryCSMTParsed
     , runPure
     )
 import CSMT.Test.Lib
     ( ListOf
     , element
-    , insertMInt
+    , insertMWord64
     , list
     , node
+    , word64Codecs
     )
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Word (Word64)
 import Test.Hspec (Expectation, Spec, describe, it, shouldBe)
 import Prelude
 
 hasExpectedDB
-    :: (Show a, Eq a)
-    => Pure Key v a b
-    -> ListOf (Key, Indirect a) ()
-    -> Expectation
+    :: Pure b -> ListOf (Key, Indirect Word64) () -> Expectation
 hasExpectedDB program expectedDB =
     let (_, r) = runPure emptyInMemoryDB program
-    in  inMemoryCSMT r `shouldBe` mkDb expectedDB
+    in  inMemoryCSMTParsed word64Codecs r `shouldBe` mkDb expectedDB
 
-record :: Key -> Key -> Int -> ListOf (Key, Indirect Int) ()
+record :: Key -> Key -> Word64 -> ListOf (Key, Indirect Word64) ()
 record p k v = element (p, node k v)
 
-i :: Key -> Int -> Pure Key Int Int ()
-i = insertMInt
+i :: Key -> Word64 -> Pure ()
+i = insertMWord64
 
 mkDb :: ListOf (Key, Indirect a) () -> Map Key (Indirect a)
 mkDb = Map.fromList . list

@@ -5,16 +5,13 @@ module CSMT.Interface
     ( -- * Keys
       Direction (..)
     , Key
+    , keyPrism
     , compareKeys
     , opposite
 
       -- * Interface Types
     , Indirect (..)
     , Hashing (..)
-    , Op (..)
-    , Change
-    , QueryCSMT
-    , Backend (..)
     , FromKV (..)
 
       -- * Serialization Helpers
@@ -31,12 +28,15 @@ module CSMT.Interface
     , putSizedByteString
     , addWithDirection
     , prefix
+    , csmtCodecs
     )
 where
 
+import Control.Lens (Prism', preview, prism', review, (<&>))
 import Data.Bits (Bits (..))
 import Data.ByteArray (convert)
 import Data.ByteArray qualified as BA
+import Data.ByteString (ByteString)
 import Data.List (unfoldr)
 import Data.Serialize
     ( Get
@@ -47,6 +47,15 @@ import Data.Serialize
     , putByteString
     , putWord16be
     , putWord8
+    )
+import Data.Serialize.Extra (evalGetM, evalPutM, unsafeEvalGet)
+import Database.KV.Transaction
+    ( Codecs (..)
+    , GCompare
+    , KV
+    , Selector
+    , Transaction
+    , query
     )
 
 -- | Key segment
@@ -83,29 +92,6 @@ data Indirect a = Indirect
 prefix :: Key -> Indirect a -> Indirect a
 prefix q Indirect{jump, value} = Indirect{jump = q ++ jump, value}
 
-data Op k v a
-    = InsertCSMT Key (Indirect a)
-    | DeleteCSMT Key
-    | InsertKV k v
-    | DeleteKV k
-    deriving (Show, Eq)
-
--- | Type alias for a change function in some monad m. It support batch inserts.
-type Change m k v a = [Op k v a] -> m ()
-
--- | Type alias for a queryCSMT function in some monad m.
-type QueryCSMT m a = Key -> m (Maybe (Indirect a))
-
-type QueryKV m k v = k -> m (Maybe v)
-
--- | The backend interface for a CSMT in some monad m.
-data Backend m k v a = Backend
-    { change :: Change m k v a
-    , queryCSMT :: QueryCSMT m a
-    , queryKV :: QueryKV m k v
-    , fromKV :: FromKV k v a
-    }
-
 data FromKV k v a
     = FromKV
     { fromK :: k -> Key
@@ -123,9 +109,13 @@ compareKeys (x : xs) (y : ys)
         in  (x : j, o, r)
     | otherwise = ([], x : xs, y : ys)
 
-root :: Monad m => Hashing a -> Backend m k v a -> m (Maybe a)
-root hsh csmt = do
-    mi <- queryCSMT csmt []
+root
+    :: (Monad m, GCompare d)
+    => Hashing a
+    -> Selector d Key (Indirect a)
+    -> Transaction m cf d ops (Maybe a)
+root hsh sel = do
+    mi <- query sel []
     pure $ case mi of
         Nothing -> Nothing
         Just i -> Just $ rootHash hsh i
@@ -208,3 +198,24 @@ addWithDirection
     :: Hashing a -> Direction -> Indirect a -> Indirect a -> a
 addWithDirection Hashing{combineHash} L left right = combineHash left right
 addWithDirection Hashing{combineHash} R left right = combineHash right left
+
+indirectPrism :: Prism' ByteString a -> Prism' ByteString (Indirect a)
+indirectPrism prismA =
+    prism'
+        (evalPutM . putIndirect . fmap (review prismA))
+        ( unsafeEvalGet $ do
+            -- TODO: unsafe ?
+            Indirect k x <- getIndirect
+            pure $ preview prismA x <&> \a ->
+                Indirect{jump = k, value = a}
+        )
+
+keyPrism :: Prism' ByteString Key
+keyPrism = prism' (evalPutM . putKey) (evalGetM getKey)
+
+csmtCodecs :: Prism' ByteString a -> Codecs (KV Key (Indirect a))
+csmtCodecs prismA =
+    Codecs
+        { keyCodec = keyPrism
+        , valueCodec = indirectPrism prismA
+        }

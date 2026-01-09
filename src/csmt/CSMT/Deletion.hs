@@ -7,20 +7,25 @@ module CSMT.Deletion
 where
 
 import CSMT.Interface
-    ( Backend (..)
-    , Direction (..)
+    ( Direction (..)
     , FromKV (..)
     , Hashing (..)
     , Indirect (..)
     , Key
-    , Op (..)
-    , QueryCSMT
     , addWithDirection
     , compareKeys
     , opposite
     )
 import Control.Monad (guard)
 import Control.Monad.Trans.Maybe (MaybeT (..))
+import Database.KV.Transaction
+    ( GCompare
+    , Selector
+    , Transaction
+    , delete
+    , insert
+    , query
+    )
 
 data DeletionPath a where
     Value :: Key -> a -> DeletionPath a
@@ -29,22 +34,40 @@ data DeletionPath a where
     deriving (Show, Eq)
 
 deleting
-    :: Monad m => Backend m k v a -> Hashing a -> k -> m ()
-deleting Backend{queryCSMT, change, fromKV = FromKV{fromK}} hashing key = do
-    mpath <- newDeletionPath queryCSMT (fromK key)
+    :: (Monad m, Ord k, GCompare d)
+    => FromKV k v a
+    -> Hashing a
+    -> Selector d k v
+    -> Selector d Key (Indirect a)
+    -> k
+    -> Transaction m cf d ops ()
+deleting FromKV{fromK} hashing kvSel csmtSel key = do
+    mpath <- newDeletionPath csmtSel (fromK key)
     case mpath of
         Nothing -> pure ()
-        Just path -> change $ deletionPathToOps hashing path <> [DeleteKV key]
+        Just path -> do
+            delete kvSel key
+            mapM_ (applyOp csmtSel) $ deletionPathToOps hashing path
+applyOp
+    :: GCompare d
+    => Selector d Key (Indirect a)
+    -> (Key, Maybe (Indirect a))
+    -> Transaction m cf d ops ()
+applyOp csmtSel (k, Nothing) = delete csmtSel k
+applyOp csmtSel (k, Just i) = insert csmtSel k i
 
 deletionPathToOps
-    :: forall k v a
+    :: forall a
      . Hashing a
     -> DeletionPath a
-    -> [Op k v a]
+    -> [(Key, Maybe (Indirect a))]
 deletionPathToOps hashing = snd . go []
   where
-    go :: Key -> DeletionPath a -> (Maybe (Indirect a), [Op k v a])
-    go k (Value _ _v) = (Nothing, [DeleteCSMT k])
+    go
+        :: Key
+        -> DeletionPath a
+        -> (Maybe (Indirect a), [(Key, Maybe (Indirect a))])
+    go k (Value _ _v) = (Nothing, [(k, Nothing)])
     go k (Branch j d v i) =
         let
             (msb, xs) = go (k <> j <> [d]) v
@@ -54,7 +77,7 @@ deletionPathToOps hashing = snd . go []
                     let h = addWithDirection hashing d i' i
                         i'' = Indirect{jump = j, value = h}
                     in  ( Just i''
-                        , [InsertCSMT k i''] <> xs
+                        , [(k, Just i'')] <> xs
                         )
                 Nothing ->
                     let i' =
@@ -63,23 +86,26 @@ deletionPathToOps hashing = snd . go []
                                 , value = value i
                                 }
                     in  ( Just i'
-                        , [ InsertCSMT k i'
-                          , DeleteCSMT (k <> j <> [opposite d])
+                        , [ (k, Just i')
+                          , (k <> j <> [opposite d], Nothing)
                           ]
                             <> xs
                         )
 
 newDeletionPath
-    :: forall m a
-     . Monad m
-    => QueryCSMT m a
+    :: forall a d ops cf m
+     . (Monad m, GCompare d)
+    => Selector d Key (Indirect a)
     -> Key
-    -> m (Maybe (DeletionPath a))
-newDeletionPath q = runMaybeT . go []
+    -> Transaction m cf d ops (Maybe (DeletionPath a))
+newDeletionPath csmtSel = runMaybeT . go []
   where
-    go :: Key -> Key -> MaybeT m (DeletionPath a)
+    go
+        :: Key
+        -> Key
+        -> MaybeT (Transaction m cf d ops) (DeletionPath a)
     go current remaining = do
-        Indirect{jump = j, value = v} <- MaybeT $ q current
+        Indirect{jump = j, value = v} <- MaybeT $ query csmtSel current
         let (_common, other, remaining') = compareKeys j remaining
         guard $ null other
         case remaining' of
@@ -87,6 +113,6 @@ newDeletionPath q = runMaybeT . go []
             (r : remaining'') -> do
                 let current' = current <> j
                 sibiling <-
-                    MaybeT $ q (current' <> [opposite r])
+                    MaybeT $ query csmtSel (current' <> [opposite r])
                 p <- go (current' <> [r]) remaining''
                 pure $ Branch j r p sibiling
