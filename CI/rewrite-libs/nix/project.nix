@@ -10,7 +10,6 @@ let
     withHoogle = true;
     buildInputs = [
       pkgs.just
-      pkgs.gitAndTools.git
       pkgs.haskellPackages.fourmolu
       pkgs.haskellPackages.ghcid
       pkgs.haskellPackages.hlint

@@ -15,7 +15,6 @@ let
     };
     withHoogle = true;
     buildInputs = [
-      pkgs.gitAndTools.git
       pkgs.just
       pkgs.nixfmt-classic
       pkgs.shellcheck
