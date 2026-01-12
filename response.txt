@@ -1,7 +1,0 @@
-HTTP/2 404 
-content-type: text/plain; charset=utf-8
-x-content-type-options: nosniff
-content-length: 19
-date: Sat, 18 Oct 2025 16:52:29 GMT
-
-404 page not found
