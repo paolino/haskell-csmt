@@ -74,8 +74,6 @@ library
     , containers
     , crypton
     , csmt:rocksdb-transactions
-    , dependent-map
-    , dependent-sum
     , exceptions
     , haskeline
     , lens
@@ -148,8 +146,6 @@ test-suite unit-tests
     , csmt:rocksdb-transactions
     , csmt:test-lib
     , data-default
-    , dependent-map
-    , dependent-sum
     , filepath
     , hspec
     , lens

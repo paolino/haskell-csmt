@@ -7,16 +7,23 @@ import Control.Lens (Prism', prism')
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
 import Data.Default (Default (..))
-import Data.Dependent.Map (DMap)
-import Data.Dependent.Map qualified as DMap
-import Data.Dependent.Sum (DSum (..))
-import Data.GADT.Compare (GCompare (..), GEq (..), GOrdering (..))
 import Data.Serialize (getWord64be, putWord64be)
 import Data.Serialize.Extra (evalGetM, evalPutM)
 import Data.Type.Equality ((:~:) (..))
 import Data.Word (Word64)
 import Database.KV.RocksDB.Transaction (runRocksDBTransaction)
-import Database.KV.Transaction (Codecs (..), KV, insert, query)
+import Database.KV.Transaction
+    ( Codecs (..)
+    , DMap
+    , DSum (..)
+    , GCompare (..)
+    , GEq (..)
+    , GOrdering (..)
+    , KV
+    , insert
+    , mkCols
+    , query
+    )
 import Database.RocksDB (Config (createIfMissing), withDBCF)
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Hspec (Spec, describe, it, shouldBe)
@@ -61,7 +68,7 @@ instance GEq C where
 
 dmapCodecs :: DMap C Codecs
 dmapCodecs =
-    DMap.fromList
+    mkCols
         [ C_KV :=> kvCodec
         , C_KN :=> knCodec
         ]

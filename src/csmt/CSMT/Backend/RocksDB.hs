@@ -20,13 +20,13 @@ import Control.Monad ((<=<))
 import Control.Monad.Trans.Class (MonadTrans (..))
 import Control.Monad.Trans.Reader (ReaderT (..), ask, asks)
 import Data.ByteString (ByteString)
-import Data.Dependent.Map (DMap)
-import Data.Dependent.Map qualified as DMap
-import Data.Dependent.Sum (DSum (..))
 import Database.KV.Transaction
     ( Codecs (..)
     , Column (..)
+    , DMap
+    , DSum (..)
     , Database (..)
+    , mkCols
     )
 import Database.RocksDB
     ( BatchOp (..)
@@ -63,7 +63,7 @@ standaloneRocksDBCols
 standaloneRocksDBCols
     StandaloneCodecs{keyCodec, valueCodec, nodeCodec = pa}
     [kvcf, csmtcf] =
-        DMap.fromList
+        mkCols
             [ StandaloneKVCol
                 :=> Column
                     { family = kvcf

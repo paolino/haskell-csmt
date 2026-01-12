@@ -37,17 +37,17 @@ import Control.Monad.Trans.State.Strict
     , modify'
     )
 import Data.ByteString (ByteString)
-import Data.Dependent.Map (DMap)
-import Data.Dependent.Map qualified as DMap
-import Data.Dependent.Sum (DSum ((:=>)))
 import Data.Foldable (forM_)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Database.KV.Transaction
     ( Codecs (..)
     , Column (..)
+    , DMap
+    , DSum (..)
     , Database (..)
     , Transaction
+    , mkCols
     , run
     )
 
@@ -118,7 +118,7 @@ standalonePureCols
     :: StandaloneCodecs k v a
     -> DMap (Standalone k v a) (Column StandaloneCF)
 standalonePureCols StandaloneCodecs{keyCodec = pk, valueCodec = pv, nodeCodec = pa} =
-    DMap.fromList
+    mkCols
         [ StandaloneKVCol
             :=> Column
                 { family = StandaloneKV

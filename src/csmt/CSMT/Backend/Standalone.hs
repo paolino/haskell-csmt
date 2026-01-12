@@ -15,8 +15,12 @@ where
 import CSMT.Interface (Indirect (..), Key)
 import Control.Lens (Prism', type (:~:) (..))
 import Data.ByteString (ByteString)
-import Data.GADT.Compare (GCompare (..), GEq (..), GOrdering (..))
-import Database.KV.Transaction (KV)
+import Database.KV.Transaction
+    ( GCompare (..)
+    , GEq (..)
+    , GOrdering (..)
+    , KV
+    )
 
 data StandaloneCF = StandaloneKV | StandaloneCSMT
 
