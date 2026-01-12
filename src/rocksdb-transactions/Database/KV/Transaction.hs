@@ -23,7 +23,10 @@ module Database.KV.Transaction
     , run
 
       -- * Reexport
-    , GCompare
+    , module Data.GADT.Compare
+    , module Data.Dependent.Map
+    , module Data.Dependent.Sum
+    , mkCols
     )
 where
 
@@ -43,10 +46,10 @@ import Control.Monad.Trans.State.Strict
     , modify
     )
 import Data.ByteString (ByteString)
-import Data.Dependent.Map (DMap)
+import Data.Dependent.Map (DMap, fromList)
 import Data.Dependent.Map qualified as DMap
 import Data.Dependent.Sum (DSum ((:=>)))
-import Data.GADT.Compare (GCompare)
+import Data.GADT.Compare (GCompare (..), GEq (..), GOrdering (..))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 
@@ -265,3 +268,6 @@ mkOp
     Database{mkOperation}
     Column{family, codecs = Codecs{keyCodec, valueCodec}}
     k = mkOperation family (review keyCodec k) . fmap (review valueCodec)
+
+mkCols :: GCompare t => [DSum t r] -> DMap t r
+mkCols = DMap.fromList
