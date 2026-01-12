@@ -28,13 +28,13 @@ jobs:
         with:
           name: csmt-image
           path: csmt-image
-      - name: Build arx artifact
-        run: nix bundle -o csmt.arx
-      - name: Upload arx artifact
+      - name: Build appImage artifact
+        run: nix bundle --bundler github:ralismark/nix-appimage .#csmt -o csmt.AppImage
+      - name: Upload appImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: csmt-arx
-          path: csmt.arx
+          name: csmt-appImage
+          path: csmt.AppImage
       - name: Build rpm artifact
         run: nix bundle --bundler github:NixOS/bundlers#toRPM -o csmt.rpm
       - name: Upload rpm artifact
