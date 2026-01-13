@@ -1,18 +1,22 @@
 module Database.KV.RocksDB.Transaction
     ( runRocksDBTransaction
-    , standaloneRocksDBDatabase
+    , mkRocksDBDatabase
     , mkColumns
     )
 where
 
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.IO.Class (MonadIO (..))
 import Data.Dependent.Map (DMap)
 import Data.Dependent.Map qualified as DMap
 import Data.GADT.Compare (GCompare)
+import Database.KV.Database
+    ( Database (..)
+    , Pos (..)
+    , QueryIterator (..)
+    )
 import Database.KV.Transaction
     ( Codecs (..)
     , Column (..)
-    , Database (..)
     , Transaction
     , run
     )
@@ -20,7 +24,16 @@ import Database.RocksDB
     ( BatchOp (..)
     , ColumnFamily
     , DB (..)
+    , createIterator
+    , destroyIterator
     , getCF
+    , iterEntry
+    , iterFirst
+    , iterLast
+    , iterNext
+    , iterPrev
+    , iterSeek
+    , iterValid
     , write
     )
 
@@ -32,12 +45,12 @@ mkColumns db = snd . DMap.mapAccumLWithKey f (columnFamilies db)
     f [] _ _ =
         error "mkColumns: not enough column families in DB"
 
-standaloneRocksDBDatabase
+mkRocksDBDatabase
     :: MonadIO m
     => DB
     -> DMap t (Column ColumnFamily)
     -> Database m ColumnFamily t BatchOp
-standaloneRocksDBDatabase db columns =
+mkRocksDBDatabase db columns =
     Database
         { valueAt = \cf k -> do
             getCF db cf k
@@ -48,6 +61,20 @@ standaloneRocksDBDatabase db columns =
                 Just v -> PutCF cf k v
                 Nothing -> DelCF cf k
         , columns
+        , newIterator = \cf -> do
+            i <- createIterator db $ Just cf
+            return
+                $ QueryIterator
+                    { isValid = liftIO $ iterValid i
+                    , entry = liftIO $ iterEntry i
+                    , step = \pos -> liftIO $ case pos of
+                        PosFirst -> iterFirst i
+                        PosLast -> iterLast i
+                        PosNext -> iterNext i
+                        PosPrev -> iterPrev i
+                        PosAny k -> iterSeek i k
+                        PosDestroy -> destroyIterator i
+                    }
         }
 
 runRocksDBTransaction
@@ -59,4 +86,4 @@ runRocksDBTransaction
     -- ^ Codecs for each column of t
     -> Transaction IO ColumnFamily t BatchOp a
     -> IO a
-runRocksDBTransaction db codecs = run $ standaloneRocksDBDatabase db $ mkColumns db codecs
+runRocksDBTransaction db codecs = run $ mkRocksDBDatabase db $ mkColumns db codecs
