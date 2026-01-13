@@ -4,6 +4,7 @@ module CSMT.Backend.RocksDB.TransactionSpec
 where
 
 import Control.Lens (Prism', prism')
+import Control.Monad.Trans.Class (MonadTrans (..))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
 import Data.Default (Default (..))
@@ -11,6 +12,13 @@ import Data.Serialize (getWord64be, putWord64be)
 import Data.Serialize.Extra (evalGetM, evalPutM)
 import Data.Type.Equality ((:~:) (..))
 import Data.Word (Word64)
+import Database.KV.Cursor
+    ( Entry (..)
+    , firstEntry
+    , lastEntry
+    , nextEntry
+    , prevEntry
+    )
 import Database.KV.RocksDB.Transaction (runRocksDBTransaction)
 import Database.KV.Transaction
     ( Codecs (..)
@@ -20,72 +28,116 @@ import Database.KV.Transaction
     , GEq (..)
     , GOrdering (..)
     , KV
+    , Transaction
     , insert
+    , iterating
     , mkCols
     , query
     )
-import Database.RocksDB (Config (createIfMissing), withDBCF)
+import Database.RocksDB
+    ( BatchOp
+    , ColumnFamily
+    , Config (createIfMissing)
+    , withDBCF
+    )
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
+-- Codecs for ByteString key-value pairs
 kvCodec :: Codecs (KV ByteString ByteString)
-kvCodec =
-    Codecs
-        { keyCodec = id
-        , valueCodec = id
-        }
+kvCodec = Codecs{keyCodec = id, valueCodec = id}
 
+-- Codecs for ByteString key and Word64 value pairs
 knCodec :: Codecs (KV ByteString Word64)
 knCodec =
     Codecs
         { keyCodec = id
-        , valueCodec = word64Prism
+        , valueCodec =
+            prism'
+                (evalPutM . putWord64be)
+                (evalGetM getWord64be)
         }
 
-word64Prism :: Prism' ByteString Word64
-word64Prism = prism' putWord64 getWord64
-  where
-    putWord64 :: Word64 -> ByteString
-    putWord64 = evalPutM . putWord64be
+-- GADT to select between different tables
+data Tables a where
+    Words :: Tables (KV ByteString ByteString)
+    Lenghts :: Tables (KV ByteString Word64)
 
-    getWord64 :: ByteString -> Maybe Word64
-    getWord64 = evalGetM getWord64be
+-- these instances are required for using Tables as a GADT key in a DMap
+-- see https://hackage.haskell.org/package/dependent-map
+-- they could be derived via TH
+instance GCompare Tables where
+    gcompare Words Words = GEQ
+    gcompare Lenghts Lenghts = GEQ
+    gcompare Words Lenghts = GLT
+    gcompare Lenghts Words = GGT
 
-data C a where
-    C_KV :: C (KV ByteString ByteString)
-    C_KN :: C (KV ByteString Word64)
-
-instance GCompare C where
-    gcompare C_KV C_KV = GEQ
-    gcompare C_KN C_KN = GEQ
-    gcompare C_KV C_KN = GLT
-    gcompare C_KN C_KV = GGT
-
-instance GEq C where
-    geq C_KV C_KV = Just Refl
-    geq C_KN C_KN = Just Refl
+instance GEq Tables where
+    geq Words Words = Just Refl
+    geq Lenghts Lenghts = Just Refl
     geq _ _ = Nothing
 
-dmapCodecs :: DMap C Codecs
-dmapCodecs =
+-- index codecs by table type
+codecs :: DMap Tables Codecs
+codecs =
     mkCols
-        [ C_KV :=> kvCodec
-        , C_KN :=> knCodec
+        [ Words :=> kvCodec
+        , Lenghts :=> knCodec
         ]
 
 spec :: Spec
 spec = describe "RocksDB Transaction Backend" $ do
     it "can run a simple transaction" $ do
-        x <- withSystemTempDirectory "test-db" $ \fp -> do
-            withDBCF fp cfg [("kv", cfg), ("kn", cfg)] $ \db -> do
-                runRocksDBTransaction db dmapCodecs $ do
-                    insert C_KV "key1" "value1"
-                    mv <- query C_KV "key1"
-                    insert C_KN "key1" $ case mv of
+        result <- withSystemTempDirectory "test-db" $ \fp -> do
+            withDBCF fp cfg [("words", cfg), ("lengths", cfg)] $ \db -> do
+                runRocksDBTransaction db codecs $ do
+                    insert Words "a" "apple"
+                    mv <- query Words "a"
+                    insert Lenghts "a" $ case mv of
                         Just v -> fromIntegral $ B.length v
                         Nothing -> 0
-                    query C_KN "key1"
-        x `shouldBe` Just 6
+                    query Lenghts "a"
+        result `shouldBe` Just 5
+    it
+        "can iterate over a table and build while building transaction with them"
+        $ do
+            result <- withSystemTempDirectory "test-db" $ \fp -> do
+                withDBCF fp cfg [("words", cfg), ("lengths", cfg)] $ \db -> do
+                    let transact
+                            :: Transaction IO ColumnFamily Tables BatchOp a -> IO a
+                        transact = runRocksDBTransaction db codecs
+                        insertLength Nothing = pure ()
+                        insertLength (Just (Entry x v)) =
+                            lift
+                                $ insert Lenghts x
+                                $ fromIntegral
+                                $ B.length v
+                    -- Insert some key-value pairs bby building a transaction over the KV table
+                    transact $ do
+                        insert Words "a" "apple"
+                        insert Words "b" "banana"
+                        insert Words "c" "carrot"
+                    -- Iterate over the key-value while building a transaction on the length table
+                    transact $ do
+                        iterating Words $ do
+                            firstEntry >>= insertLength
+                            nextEntry >>= insertLength
+                            nextEntry >>= insertLength
+                            nextEntry >>= insertLength
+                    -- Finally, iterate backwards to get the entries, no transaction
+                    transact $ do
+                        iterating Lenghts $ do
+                            x <- lastEntry
+                            y <- prevEntry
+                            z <- prevEntry
+                            l <- prevEntry
+                            pure (x, y, z, l)
+            result
+                `shouldBe` ( Just $ Entry{entryKey = "c", entryValue = 6}
+                           , Just $ Entry{entryKey = "b", entryValue = 6}
+                           , Just $ Entry{entryKey = "a", entryValue = 5}
+                           , Nothing
+                           )
 
 cfg :: Config
 cfg = def{createIfMissing = True}

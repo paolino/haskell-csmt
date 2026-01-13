@@ -17,44 +17,25 @@ import CSMT.Interface (csmtCodecs)
 import Control.Concurrent (newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.Async (async, link)
 import Control.Monad ((<=<))
-import Control.Monad.Trans.Class (MonadTrans (..))
-import Control.Monad.Trans.Reader (ReaderT (..), ask, asks)
-import Data.ByteString (ByteString)
+import Control.Monad.Trans.Reader (ReaderT (..), ask)
+import Database.KV.Database (Database (..))
+import Database.KV.RocksDB.Transaction (mkRocksDBDatabase)
 import Database.KV.Transaction
     ( Codecs (..)
     , Column (..)
     , DMap
     , DSum (..)
-    , Database (..)
     , mkCols
     )
 import Database.RocksDB
     ( BatchOp (..)
     , ColumnFamily
     , Config (..)
-    , DB (columnFamilies)
-    , getCF
+    , DB (..)
     , withDBCF
-    , write
     )
 
 type RocksDB = ReaderT DB IO
-
-rocksValueAt
-    :: ColumnFamily -> ByteString -> RocksDB (Maybe ByteString)
-rocksValueAt cf key = do
-    db <- ask
-    lift $ getCF db cf key
-
-rocksApplyOps :: [BatchOp] -> RocksDB ()
-rocksApplyOps ops = do
-    db <- ask
-    lift $ write db ops
-
-rocksMkOperation
-    :: ColumnFamily -> ByteString -> Maybe ByteString -> BatchOp
-rocksMkOperation cf key Nothing = DelCF cf key
-rocksMkOperation cf key (Just value) = PutCF cf key value
 
 standaloneRocksDBCols
     :: StandaloneCodecs k v a
@@ -81,14 +62,9 @@ standaloneRocksDBDatabase
     :: StandaloneCodecs k v a
     -> RocksDB (Database RocksDB ColumnFamily (Standalone k v a) BatchOp)
 standaloneRocksDBDatabase codecs = do
-    cf <- asks columnFamilies
+    db@DB{columnFamilies} <- ask
     pure
-        $ Database
-            { valueAt = rocksValueAt
-            , applyOps = rocksApplyOps
-            , mkOperation = rocksMkOperation
-            , columns = standaloneRocksDBCols codecs cf
-            }
+        $ mkRocksDBDatabase db (standaloneRocksDBCols codecs columnFamilies)
 
 newtype RunRocksDB = RunRocksDB (forall a. RocksDB a -> IO a)
 

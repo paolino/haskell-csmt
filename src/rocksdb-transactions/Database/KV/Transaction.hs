@@ -8,7 +8,6 @@ module Database.KV.Transaction
     , KV
 
       -- * Transaction monadic context
-    , Database (..)
     , Context
 
       -- * Transaction program instructions and monad
@@ -27,10 +26,11 @@ module Database.KV.Transaction
     , module Data.Dependent.Map
     , module Data.Dependent.Sum
     , mkCols
+    , iterating
     )
 where
 
-import Control.Lens (Prism', preview, review)
+import Control.Lens (review)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Operational
     ( ProgramT
@@ -45,56 +45,14 @@ import Control.Monad.Trans.State.Strict
     , get
     , modify
     )
-import Data.ByteString (ByteString)
 import Data.Dependent.Map (DMap, fromList)
 import Data.Dependent.Map qualified as DMap
 import Data.Dependent.Sum (DSum ((:=>)))
 import Data.GADT.Compare (GCompare (..), GEq (..), GOrdering (..))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-
--- | Column definition for key-value pairs. This is a placeholder for the 2 types k v.
--- It is needed as a single type index.
-data KV k v
-
--- | Selector type for columns
-type Selector t k v = t (KV k v)
-
--- | Project key type from column
-type family KeyOf c where
-    KeyOf (KV k v) = k
-
--- | Project value type from column
-type family ValueOf c where
-    ValueOf (KV k v) = v
-
--- | Codecs for encoding/decoding keys and values
-data Codecs c = Codecs
-    { keyCodec :: Prism' ByteString (KeyOf c)
-    , valueCodec :: Prism' ByteString (ValueOf c)
-    }
-
--- | Column definition
-data Column cf c = Column
-    { family :: cf
-    , codecs :: Codecs c
-    }
-
--- throw should never happen
-decodeValueThrow
-    :: MonadFail m => Codecs c -> ByteString -> m (ValueOf c)
-decodeValueThrow codec bs =
-    case preview (valueCodec codec) bs of
-        Just v -> return v
-        Nothing -> fail "Failed to decode value"
-
--- | DB 'interface
-data Database m cf t op = Database
-    { valueAt :: cf -> ByteString -> m (Maybe ByteString)
-    , applyOps :: [op] -> m ()
-    , mkOperation :: cf -> ByteString -> Maybe ByteString -> op
-    , columns :: DMap t (Column cf)
-    }
+import Database.KV.Cursor (Cursor, interpretCursor)
+import Database.KV.Database
 
 -- | Workspace for a single column, this iis where the changes are stored
 newtype Workspace c = Workspace (Map (KeyOf c) (Maybe (ValueOf c)))
@@ -110,7 +68,7 @@ overWorkspace f (Workspace ws) = Workspace (f ws)
 type Workspaces t = DMap t Workspace
 
 -- | Monad that read the DB before the transaction and modifies the workspaces
-newtype Context m cf t op a = Context
+newtype Context cf t op m a = Context
     { unContext
         :: StateT (Workspaces t) (ReaderT (Database m cf t op) m) a
     }
@@ -122,25 +80,37 @@ newtype Context m cf t op a = Context
         , MonadIO
         )
 
+instance MonadTrans (Context cf t op) where
+    lift f = Context $ do
+        lift . lift $ f
+
 -- | Instructions for the transaction
-data Instruction t a where
+data Instruction m cf t op a where
     Query
         :: (GCompare t, Ord (KeyOf c))
         => t c
         -> KeyOf c
-        -> Instruction t (Maybe (ValueOf c))
+        -> Instruction m cf t op (Maybe (ValueOf c))
     Insert
         :: (GCompare t, Ord (KeyOf c))
         => t c
         -> KeyOf c
         -> ValueOf c
-        -> Instruction t ()
+        -> Instruction m cf t op ()
     Delete
-        :: (GCompare t, Ord (KeyOf c)) => t c -> KeyOf c -> Instruction t ()
+        :: (GCompare t, Ord (KeyOf c))
+        => t c
+        -> KeyOf c
+        -> Instruction m cf t op ()
+    Iterating
+        :: (GCompare t)
+        => t c
+        -> Cursor (Transaction m cf t op) c a
+        -> Instruction m cf t op a
 
 -- | Transaction operational monad
 type Transaction m cf t op =
-    ProgramT (Instruction t) (Context m cf t op)
+    ProgramT (Instruction m cf t op) (Context cf t op m)
 
 -- | Query a value for the given key in the given column
 query
@@ -174,11 +144,20 @@ delete
     -> Transaction m cf t op ()
 delete t k = singleton $ Delete t k
 
+iterating
+    :: (GCompare t)
+    => t c
+    -- ^ column
+    -> Cursor (Transaction m cf t op) c a
+    -- ^ cursor operations
+    -> Transaction m cf t op a
+iterating t cursorProg = singleton $ Iterating t cursorProg
+
 interpretQuery
     :: (GCompare t, Ord (KeyOf f), MonadFail m)
     => t f
     -> KeyOf f
-    -> Context m cf t op (Maybe (ValueOf f))
+    -> Context cf t op m (Maybe (ValueOf f))
 interpretQuery t k = Context $ do
     workspaces <- get
     case DMap.lookup t workspaces of
@@ -199,7 +178,7 @@ interpretInsert
     => t c
     -> KeyOf c
     -> ValueOf c
-    -> Context m cf t op ()
+    -> Context cf t op m ()
 interpretInsert t k v =
     Context
         $ modify
@@ -209,17 +188,36 @@ interpretDelete
     :: (GCompare t, Ord (KeyOf c), Monad m)
     => t c
     -> KeyOf c
-    -> Context m cf t op ()
+    -> Context cf t op m ()
 interpretDelete t k =
     Context
         $ modify
         $ DMap.adjust (overWorkspace (Map.insert k Nothing)) t
 
+interpretIterating
+    :: (GCompare t, MonadFail m)
+    => t c
+    -> Cursor (Transaction m cf t op) c a
+    -> Context cf t op m a
+interpretIterating t cursorProg = Context $ do
+    Database{newIterator, columns} <- lift ask
+    column <-
+        case DMap.lookup t columns of
+            Just col -> pure col
+            Nothing -> fail "interpretIterating: column not found"
+    qi <- lift $ lift $ newIterator (family column)
+    unContext
+        $ interpretTransaction
+        $ interpretCursor
+            (hoistQueryIterator (lift . lift) qi)
+            column
+            cursorProg
+
 -- | Interpret the transaction as a value in the Context monad
 interpretTransaction
     :: (GCompare t, MonadFail m)
     => Transaction m cf t op a
-    -> Context m cf t op a
+    -> Context cf t op m a
 interpretTransaction prog = do
     v <- viewT prog
     case v of
@@ -234,6 +232,9 @@ interpretTransaction prog = do
             Delete t key -> do
                 interpretDelete t key
                 interpretTransaction (k ())
+            Iterating t cursorProg -> do
+                r <- interpretIterating t cursorProg
+                interpretTransaction (k r)
 
 -- | Run a transaction in the given database context
 run

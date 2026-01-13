@@ -90,6 +90,8 @@ library rocksdb-transactions
   import:           warnings
   visibility:       public
   exposed-modules:
+    Database.KV.Cursor
+    Database.KV.Database
     Database.KV.RocksDB.Transaction
     Database.KV.Transaction
 
@@ -153,6 +155,7 @@ test-suite unit-tests
     , QuickCheck
     , rocksdb-haskell-jprupp
     , temporary
+    , transformers
 
   build-tool-depends: hspec-discover:hspec-discover
   type:               exitcode-stdio-1.0
