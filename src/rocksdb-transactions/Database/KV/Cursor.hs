@@ -20,14 +20,13 @@ module Database.KV.Cursor
     )
 where
 
-import Control.Lens (preview)
+import Control.Lens (preview, review)
 import Control.Monad.Operational
     ( ProgramT
     , ProgramViewT (..)
     , singleton
     , viewT
     )
-import Data.ByteString (ByteString)
 import Database.KV.Database
     ( Codecs (..)
     , Column (..)
@@ -52,7 +51,7 @@ data Instruction c a where
     Last :: Instruction c (Maybe (Entry c))
     Next :: Instruction c (Maybe (Entry c))
     Prev :: Instruction c (Maybe (Entry c))
-    Seek :: ByteString -> Instruction c (Maybe (Entry c))
+    Seek :: KeyOf c -> Instruction c (Maybe (Entry c))
 
 -- | Cursor operational monad
 type Cursor m c =
@@ -70,7 +69,7 @@ nextEntry = singleton Next
 prevEntry :: Cursor m c (Maybe (Entry c))
 prevEntry = singleton Prev
 
-seekKey :: ByteString -> Cursor m c (Maybe (Entry c))
+seekKey :: KeyOf c -> Cursor m c (Maybe (Entry c))
 seekKey k = singleton $ Seek k
 
 getIfValid
@@ -100,8 +99,8 @@ interpretCursor
     -> Column cf c
     -> Cursor m c a
     -> m a
-interpretCursor qi@QueryIterator{step} column prog = do
-    let get = getIfValid (codecs column) qi
+interpretCursor qi@QueryIterator{step} column@Column{codecs} prog = do
+    let get = getIfValid codecs qi
     v <- viewT prog
     case v of
         Return a -> do
@@ -114,4 +113,4 @@ interpretCursor qi@QueryIterator{step} column prog = do
                 Last -> get PosLast
                 Next -> get PosNext
                 Prev -> get PosPrev
-                Seek key -> get $ PosAny key
+                Seek key -> get $ PosAny $ review (keyCodec codecs) key

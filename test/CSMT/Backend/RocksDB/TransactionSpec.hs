@@ -3,7 +3,7 @@ module CSMT.Backend.RocksDB.TransactionSpec
     )
 where
 
-import Control.Lens (Prism', prism')
+import Control.Lens (prism')
 import Control.Monad.Trans.Class (MonadTrans (..))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
