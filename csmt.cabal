@@ -73,7 +73,7 @@ library
     , cereal
     , containers
     , crypton
-    , csmt:rocksdb-transactions
+    , csmt:kv-transactions
     , exceptions
     , haskeline
     , lens
@@ -86,14 +86,13 @@ library
   default-language: Haskell2010
   other-modules:    Paths_csmt
 
-library rocksdb-transactions
+library kv-transactions
   import:           warnings
   visibility:       public
   exposed-modules:
     Database.KV.Cursor
     Database.KV.Database
     Database.KV.Query
-    Database.KV.RocksDB.Transaction
     Database.KV.Transaction
 
   build-depends:
@@ -104,10 +103,9 @@ library rocksdb-transactions
     , dependent-sum
     , lens
     , operational
-    , rocksdb-haskell-jprupp
     , transformers
 
-  hs-source-dirs:   src/rocksdb-transactions/
+  hs-source-dirs:   src/kv-transactions/
   default-language: Haskell2010
 
 executable csmt
@@ -129,7 +127,7 @@ library test-lib
     , bytestring
     , cereal
     , csmt
-    , csmt:rocksdb-transactions
+    , csmt:kv-transactions
     , free
     , lens
     , QuickCheck
@@ -147,7 +145,7 @@ test-suite unit-tests
     , cereal
     , containers
     , csmt
-    , csmt:rocksdb-transactions
+    , csmt:kv-transactions
     , csmt:test-lib
     , data-default
     , filepath
@@ -182,7 +180,7 @@ benchmark bench
     , base
     , bytestring
     , csmt
-    , csmt:rocksdb-transactions
+    , csmt:kv-transactions
     , deepseq
     , filepath
     , miniterion
@@ -196,6 +194,6 @@ executable space-leak
     , base
     , bytestring
     , csmt
-    , csmt:rocksdb-transactions
+    , csmt:kv-transactions
 
   default-language: Haskell2010

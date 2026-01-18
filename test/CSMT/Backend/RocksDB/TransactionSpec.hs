@@ -3,6 +3,7 @@ module CSMT.Backend.RocksDB.TransactionSpec
     )
 where
 
+import CSMT.Backend.RocksDB (mkRocksDBDatabase)
 import Control.Lens (prism')
 import Control.Monad.Trans.Class (MonadTrans (..))
 import Data.ByteString (ByteString)
@@ -19,7 +20,7 @@ import Database.KV.Cursor
     , nextEntry
     , prevEntry
     )
-import Database.KV.RocksDB.Transaction (runRocksDBTransaction)
+import Database.KV.Database (mkColumns)
 import Database.KV.Transaction
     ( Codecs (..)
     , DMap
@@ -33,11 +34,13 @@ import Database.KV.Transaction
     , iterating
     , mkCols
     , query
+    , run
     )
 import Database.RocksDB
     ( BatchOp
     , ColumnFamily
     , Config (createIfMissing)
+    , DB (..)
     , withDBCF
     )
 import System.IO.Temp (withSystemTempDirectory)
@@ -84,6 +87,15 @@ codecs =
         [ Words :=> kvCodec
         , Lenghts :=> knCodec
         ]
+
+runRocksDBTransaction
+    :: DB
+    -> DMap Tables Codecs
+    -> Transaction IO ColumnFamily Tables BatchOp a
+    -> IO a
+runRocksDBTransaction db cols tx = do
+    let rocksDBDatabase = mkRocksDBDatabase db $ mkColumns (columnFamilies db) cols
+    run rocksDBDatabase tx
 
 spec :: Spec
 spec = describe "RocksDB Transaction Backend" $ do

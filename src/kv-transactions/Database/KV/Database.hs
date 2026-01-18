@@ -20,6 +20,7 @@ module Database.KV.Database
     , getColumn
     , hoistDatabase
     , hoistQueryIterator
+    , mkColumns
     )
 where
 
@@ -56,6 +57,14 @@ data Column cf c = Column
     { family :: cf
     , codecs :: Codecs c
     }
+
+mkColumns :: [cf] -> DMap k2 Codecs -> DMap k2 (Column cf)
+mkColumns columnFamilies = snd . DMap.mapAccumLWithKey f columnFamilies
+  where
+    f (c : cfs) _ codec =
+        (cfs, Column c codec)
+    f [] _ _ =
+        error "mkColumns: not enough column families in DB"
 
 getColumn
     :: (GCompare k2, MonadFail f1) => k2 v -> DMap k2 f2 -> f1 (f2 v)
