@@ -101,6 +101,7 @@ library kv-transactions
     , containers
     , dependent-map
     , dependent-sum
+    , exceptions
     , lens
     , operational
     , transformers

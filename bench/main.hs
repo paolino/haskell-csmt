@@ -60,7 +60,7 @@ envCSMT path n = do
     let r = run $ do
             database <- standaloneRocksDBDatabase codecs
             forM_ [1 .. n] $ \i -> do
-                Transaction.run database
+                Transaction.runTransactionUnguarded database
                     $ insert
                         fromKVHashes
                         StandaloneKVCol
@@ -78,7 +78,7 @@ insertMany (WithRocksDb (RunRocksDB run) kill) m = do
     let r = run $ do
             database <- standaloneRocksDBDatabase codecs
             forM_ [1 .. m] $ \i -> do
-                Transaction.run database
+                Transaction.runTransactionUnguarded database
                     $ insert
                         fromKVHashes
                         StandaloneKVCol

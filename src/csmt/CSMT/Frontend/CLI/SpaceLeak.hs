@@ -37,7 +37,7 @@ main =
                 $ "Inserted " ++ show i ++ " items."
             database <- run $ standaloneRocksDBDatabase codecs
             run
-                $ Transaction.run database
+                $ Transaction.runTransactionUnguarded database
                 $ insert
                     fromKVHashes
                     StandaloneKVCol

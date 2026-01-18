@@ -52,7 +52,7 @@ import Database.KV.Transaction
     , DSum (..)
     , Transaction
     , mkCols
-    , run
+    , runTransactionUnguarded
     )
 
 data Cursor = Cursor
@@ -270,4 +270,4 @@ runPureTransaction
     :: StandaloneCodecs k v a
     -> Transaction Pure StandaloneCF (Standalone k v a) StandaloneOp b
     -> Pure b
-runPureTransaction codecs = run (pureDatabase codecs)
+runPureTransaction codecs = runTransactionUnguarded (pureDatabase codecs)

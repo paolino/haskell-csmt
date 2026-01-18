@@ -1,12 +1,9 @@
 module CSMT.Frontend.CLI.App
     ( main
-    , T
-    , RunT (..)
     ) where
 
 import CSMT.Backend.RocksDB
-    ( RocksDB
-    , RunRocksDB (RunRocksDB)
+    ( RunRocksDB (RunRocksDB)
     , standaloneRocksDBDatabase
     , withRocksDB
     )
@@ -41,8 +38,11 @@ import Data.ByteArray.Encoding
     )
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as BC
-import Database.KV.Transaction (Transaction, query)
-import Database.KV.Transaction qualified as Transaction
+import Database.KV.Transaction
+    ( RunTransaction (..)
+    , newRunTransaction
+    , query
+    )
 import Database.RocksDB (BatchOp, ColumnFamily)
 import OptEnvConf
     ( Parser
@@ -169,17 +169,16 @@ data Output
     | Node (Indirect Hash)
     | ErrorMsg Error
 
-type T =
-    Transaction
-        RocksDB
+core
+    :: Bool
+    -> RunTransaction
+        IO
         ColumnFamily
         (Standalone ByteString ByteString Hash)
         BatchOp
-
-newtype RunT = RunT (forall a. T a -> IO a)
-
-core :: Bool -> RunT -> String -> IO ()
-core isPiped (RunT run) l' = do
+    -> String
+    -> IO ()
+core isPiped (RunTransaction run) l' = do
     r <- case parseCommand $ BC.pack l' of
         Just (I k v) -> do
             run $ insert fromKVHashes StandaloneKVCol StandaloneCSMTCol k v
@@ -302,8 +301,8 @@ main = do
     hSetBuffering stdin LineBuffering
     withRocksDB optDbPath optCSMTMaxFiles optKVMaxFiles $ \(RunRocksDB run) -> do
         runT <- do
-            database <- run $ standaloneRocksDBDatabase codecs
-            pure $ RunT $ run . Transaction.run database
+            db <- run $ standaloneRocksDBDatabase codecs
+            newRunTransaction db
         isPiped <- checkPipeline
         if isPiped
             then fix $ \loop -> do

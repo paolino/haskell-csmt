@@ -34,7 +34,7 @@ import Database.KV.Transaction
     , iterating
     , mkCols
     , query
-    , run
+    , runTransactionUnguarded
     )
 import Database.RocksDB
     ( BatchOp
@@ -95,7 +95,7 @@ runRocksDBTransaction
     -> IO a
 runRocksDBTransaction db cols tx = do
     let rocksDBDatabase = mkRocksDBDatabase db $ mkColumns (columnFamilies db) cols
-    run rocksDBDatabase tx
+    runTransactionUnguarded rocksDBDatabase tx
 
 spec :: Spec
 spec = describe "RocksDB Transaction Backend" $ do

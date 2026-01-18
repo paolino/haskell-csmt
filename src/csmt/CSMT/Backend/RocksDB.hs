@@ -107,8 +107,9 @@ standaloneRocksDBCols
 standaloneRocksDBCols _ _ = error "pureCols: expected exactly two column families"
 
 standaloneRocksDBDatabase
-    :: StandaloneCodecs k v a
-    -> RocksDB (Database RocksDB ColumnFamily (Standalone k v a) BatchOp)
+    :: MonadIO m
+    => StandaloneCodecs k v a
+    -> RocksDB (Database m ColumnFamily (Standalone k v a) BatchOp)
 standaloneRocksDBDatabase codecs = do
     db@DB{columnFamilies} <- ask
     pure

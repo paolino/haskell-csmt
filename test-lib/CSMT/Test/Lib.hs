@@ -88,7 +88,7 @@ import Data.Serialize
 import Data.Serialize.Extra (evalGetM, evalPutM)
 import Data.String (IsString (..))
 import Data.Word (Word64)
-import Database.KV.Transaction (run)
+import Database.KV.Transaction (runTransactionUnguarded)
 import Test.QuickCheck
     ( listOf
     , listOf1
@@ -156,7 +156,7 @@ insertM
     -> v
     -> Pure ()
 insertM codecs fromKV hashing k v =
-    run (pureDatabase codecs)
+    runTransactionUnguarded (pureDatabase codecs)
         $ inserting fromKV hashing StandaloneKVCol StandaloneCSMTCol k v
 
 word64Prism :: Prism' ByteString Word64
@@ -175,7 +175,7 @@ deleteM
     -> k
     -> Pure ()
 deleteM codecs fromKV hashing k =
-    run (pureDatabase codecs)
+    runTransactionUnguarded (pureDatabase codecs)
         $ deleting fromKV hashing StandaloneKVCol StandaloneCSMTCol k
 
 insertMWord64 :: Key -> Word64 -> Pure ()
@@ -231,7 +231,7 @@ proofM
     -> k
     -> Pure (Maybe (Proof a))
 proofM codecs fromKV k =
-    run (pureDatabase codecs)
+    runTransactionUnguarded (pureDatabase codecs)
         $ mkInclusionProof fromKV StandaloneCSMTCol k
 
 verifyM
@@ -247,7 +247,7 @@ verifyM codecs fromKV hashing k v = do
     case mp of
         Nothing -> pure False
         Just p ->
-            run (pureDatabase codecs)
+            runTransactionUnguarded (pureDatabase codecs)
                 $ verifyInclusionProof fromKV StandaloneCSMTCol hashing v p
 
 verifyMWord64 :: Key -> Word64 -> Pure Bool
@@ -318,7 +318,7 @@ mkDeletionPath
 mkDeletionPath codecs s k =
     fst
         . runPure s
-        $ run (pureDatabase codecs)
+        $ runTransactionUnguarded (pureDatabase codecs)
         $ newDeletionPath StandaloneCSMTCol k
 
 data List e a

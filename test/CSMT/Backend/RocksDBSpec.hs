@@ -18,7 +18,6 @@ import CSMT.Backend.RocksDB
 import CSMT.Backend.RocksDB qualified as RocksDB
 import CSMT.Backend.Standalone (StandaloneCodecs (..))
 import CSMT.Deletion (deleting)
-import CSMT.Frontend.CLI.App (RunT (..), T)
 import CSMT.Hashes
     ( Hash
     , fromKVHashes
@@ -32,7 +31,12 @@ import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as BC
 import Data.Foldable (traverse_)
 import Data.List (nub)
+import Database.KV.Transaction
+    ( RunTransaction (..)
+    , newRunTransaction
+    )
 import Database.KV.Transaction qualified as Transaction
+import Database.RocksDB (BatchOp, ColumnFamily)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Hspec (Spec, around, describe, it, shouldBe)
@@ -46,13 +50,28 @@ import Test.QuickCheck
     , listOf1
     )
 
+type T a =
+    Transaction.Transaction
+        IO
+        ColumnFamily
+        (Standalone ByteString ByteString Hash)
+        BatchOp
+        a
+
+type RunT =
+    RunTransaction
+        IO
+        ColumnFamily
+        (Standalone ByteString ByteString Hash)
+        BatchOp
+
 tempDB :: (RunT -> IO a) -> IO a
 tempDB action = withSystemTempDirectory "rocksdb-test"
     $ \dir -> do
         let path = dir </> "testdb"
         withRocksDB path 1 1 $ \(RunRocksDB run) -> do
             database <- run $ RocksDB.standaloneRocksDBDatabase rocksDBCodecs
-            action $ RunT $ \r -> run $ Transaction.run database r
+            newRunTransaction database >>= action
 
 rocksDBCodecs :: StandaloneCodecs ByteString ByteString Hash
 rocksDBCodecs =
@@ -92,7 +111,7 @@ vpfM k v = do
 testRandomFactsInASparseTree
     :: RunT
     -> Property
-testRandomFactsInASparseTree (RunT run) =
+testRandomFactsInASparseTree (RunTransaction run) =
     forAll (elements [128 .. 256])
         $ \n -> forAll (genSomePaths n)
             $ \keys -> forAll (listOf $ elements [0 .. length keys - 1])
@@ -121,15 +140,15 @@ spec = around tempDB $ do
     describe "RocksDB CSMT backend" $ do
         it "can initialize and close a db"
             $ \_run -> pure @IO ()
-        it "verifies a fact" $ \(RunT run) -> run $ do
+        it "verifies a fact" $ \(RunTransaction run) -> run $ do
             iM "key1" "value1"
             r <- vpfM "key1" "value1"
             liftIO $ r `shouldBe` True
-        it "rejects an incorrect fact" $ \(RunT run) -> run $ do
+        it "rejects an incorrect fact" $ \(RunTransaction run) -> run $ do
             iM "key2" "value2"
             r <- vpfM "key2" "wrongvalue"
             liftIO $ r `shouldBe` False
-        it "rejects a deleted fact" $ \(RunT run) -> run $ do
+        it "rejects a deleted fact" $ \(RunTransaction run) -> run $ do
             iM "key3" "value3"
             dM "key3"
             r <- vpfM "key3" "value3"

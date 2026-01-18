@@ -16,22 +16,26 @@ module Database.KV.Transaction
     , query
     , insert
     , delete
+    , iterating
+    , mkCols
 
       -- * Transaction interpreter in the context
     , interpretTransaction
-    , run
+    , RunTransaction (..)
+    , newRunTransaction
+    , runTransactionUnguarded
 
       -- * Reexport
     , module Data.GADT.Compare
     , module Data.Dependent.Map
     , module Data.Dependent.Sum
-    , mkCols
-    , iterating
     )
 where
 
+import Control.Concurrent (newMVar, putMVar, takeMVar)
 import Control.Lens (review)
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.Catch (MonadMask, finally)
+import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Operational
     ( ProgramT
     , ProgramViewT (..)
@@ -53,6 +57,16 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Database.KV.Cursor (Cursor, interpretCursor)
 import Database.KV.Database
+    ( Codecs (..)
+    , Column (..)
+    , Database (..)
+    , KV
+    , KeyOf
+    , Selector
+    , ValueOf
+    , decodeValueThrow
+    , hoistQueryIterator
+    )
 
 -- | Workspace for a single column, this iis where the changes are stored
 newtype Workspace c = Workspace (Map (KeyOf c) (Maybe (ValueOf c)))
@@ -237,13 +251,13 @@ interpretTransaction prog = do
                 interpretTransaction (k r)
 
 -- | Run a transaction in the given database context
-run
+runTransactionUnguarded
     :: forall m t cf op b
      . (GCompare t, MonadFail m)
     => Database m cf t op
     -> Transaction m cf t op b
     -> m b
-run db@Database{columns, applyOps} tx = do
+runTransactionUnguarded db@Database{columns, applyOps} tx = do
     let emptyWorkspaces = DMap.map (const (Workspace Map.empty)) columns
     (result, workspaces) <-
         runReaderT
@@ -272,3 +286,17 @@ mkOp
 
 mkCols :: GCompare t => [DSum t r] -> DMap t r
 mkCols = DMap.fromList
+
+newtype RunTransaction m cf t op = RunTransaction
+    { runTransaction :: forall a. Transaction m cf t op a -> m a
+    }
+
+newRunTransaction
+    :: (GCompare t, MonadFail m, MonadIO m, MonadMask m)
+    => Database m cf t op
+    -> m (RunTransaction m cf t op)
+newRunTransaction db = do
+    lock <- liftIO $ newMVar ()
+    pure $ RunTransaction $ \tx -> do
+        free <- liftIO $ takeMVar lock
+        runTransactionUnguarded db tx `finally` liftIO (putMVar lock free)
