@@ -11,7 +11,7 @@ module Database.KV.Transaction
     , Context
 
       -- * Transaction program instructions and monad
-    , Instruction
+    , TransactionInstruction
     , Transaction
     , query
     , insert
@@ -85,32 +85,32 @@ instance MonadTrans (Context cf t op) where
         lift . lift $ f
 
 -- | Instructions for the transaction
-data Instruction m cf t op a where
+data TransactionInstruction m cf t op a where
     Query
         :: (GCompare t, Ord (KeyOf c))
         => t c
         -> KeyOf c
-        -> Instruction m cf t op (Maybe (ValueOf c))
+        -> TransactionInstruction m cf t op (Maybe (ValueOf c))
     Insert
         :: (GCompare t, Ord (KeyOf c))
         => t c
         -> KeyOf c
         -> ValueOf c
-        -> Instruction m cf t op ()
+        -> TransactionInstruction m cf t op ()
     Delete
         :: (GCompare t, Ord (KeyOf c))
         => t c
         -> KeyOf c
-        -> Instruction m cf t op ()
+        -> TransactionInstruction m cf t op ()
     Iterating
         :: (GCompare t)
         => t c
         -> Cursor (Transaction m cf t op) c a
-        -> Instruction m cf t op a
+        -> TransactionInstruction m cf t op a
 
 -- | Transaction operational monad
 type Transaction m cf t op =
-    ProgramT (Instruction m cf t op) (Context cf t op m)
+    ProgramT (TransactionInstruction m cf t op) (Context cf t op m)
 
 -- | Query a value for the given key in the given column
 query

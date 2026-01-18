@@ -92,6 +92,7 @@ library rocksdb-transactions
   exposed-modules:
     Database.KV.Cursor
     Database.KV.Database
+    Database.KV.Query
     Database.KV.RocksDB.Transaction
     Database.KV.Transaction
 
