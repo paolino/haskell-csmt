@@ -17,7 +17,6 @@ module Database.KV.Transaction
     , insert
     , delete
     , iterating
-    , mkCols
 
       -- * Transaction interpreter in the context
     , interpretTransaction
@@ -29,6 +28,7 @@ module Database.KV.Transaction
     , module Data.GADT.Compare
     , module Data.Dependent.Map
     , module Data.Dependent.Sum
+    , mkCols
     )
 where
 
@@ -66,6 +66,8 @@ import Database.KV.Database
     , ValueOf
     , decodeValueThrow
     , hoistQueryIterator
+    , mkCols
+    , mkOp
     )
 
 -- | Workspace for a single column, this iis where the changes are stored
@@ -273,24 +275,12 @@ runTransactionUnguarded db@Database{columns, applyOps} tx = do
             Just column -> pure $ uncurry (mkOp db column) <$> Map.toList ws
             Nothing -> fail "runTransaction: column not found"
 
-mkOp
-    :: Database m cf t op
-    -> Column cf c
-    -> KeyOf c
-    -> Maybe (ValueOf c)
-    -> op
-mkOp
-    Database{mkOperation}
-    Column{family, codecs = Codecs{keyCodec, valueCodec}}
-    k = mkOperation family (review keyCodec k) . fmap (review valueCodec)
-
-mkCols :: GCompare t => [DSum t r] -> DMap t r
-mkCols = DMap.fromList
-
+-- | A runner for transactions that ensures only one transaction runs at a time
 newtype RunTransaction m cf t op = RunTransaction
     { runTransaction :: forall a. Transaction m cf t op a -> m a
     }
 
+-- | Create a new RunTransaction that serializes transactions on the given database
 newRunTransaction
     :: (GCompare t, MonadFail m, MonadIO m, MonadMask m)
     => Database m cf t op

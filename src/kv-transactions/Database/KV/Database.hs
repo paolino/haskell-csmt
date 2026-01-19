@@ -1,30 +1,34 @@
 module Database.KV.Database
     ( -- * Columns and Codecs
       Codecs (..)
+    , decodeValueThrow
     , Column (..)
+    , getColumn
+    , mkColumns
+
+      -- * KV
     , Selector
     , KeyOf
     , ValueOf
     , KV
+    , mkOp
 
       -- * Transaction monadic context
     , Database (..)
+    , hoistDatabase
     , Pos (..)
     , QueryIterator (..)
+    , hoistQueryIterator
 
       -- * Reexport
     , module Data.GADT.Compare
     , module Data.Dependent.Map
     , module Data.Dependent.Sum
-    , decodeValueThrow
-    , getColumn
-    , hoistDatabase
-    , hoistQueryIterator
-    , mkColumns
+    , mkCols
     )
 where
 
-import Control.Lens (Prism', preview)
+import Control.Lens (Prism', preview, review)
 import Data.ByteString (ByteString)
 import Data.Dependent.Map (DMap, fromList)
 import Data.Dependent.Map qualified as DMap
@@ -128,3 +132,17 @@ hoistDatabase nat Database{..} =
         , newIterator = \cf -> nat $ hoistQueryIterator nat <$> newIterator cf
         , columns = columns
         }
+
+mkOp
+    :: Database m cf t op
+    -> Column cf c
+    -> KeyOf c
+    -> Maybe (ValueOf c)
+    -> op
+mkOp
+    Database{mkOperation}
+    Column{family, codecs = Codecs{keyCodec, valueCodec}}
+    k = mkOperation family (review keyCodec k) . fmap (review valueCodec)
+
+mkCols :: GCompare t => [DSum t r] -> DMap t r
+mkCols = DMap.fromList
