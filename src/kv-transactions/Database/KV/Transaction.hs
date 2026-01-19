@@ -29,6 +29,7 @@ module Database.KV.Transaction
     , module Data.Dependent.Map
     , module Data.Dependent.Sum
     , mkCols
+    , reset
     )
 where
 
@@ -75,7 +76,8 @@ newtype Workspace c = Workspace (Map (KeyOf c) (Maybe (ValueOf c)))
 
 -- modify workspace
 overWorkspace
-    :: (Map (KeyOf c) (Maybe (ValueOf c)) -> Map (KeyOf c) (Maybe (ValueOf c)))
+    :: ( Map (KeyOf c) (Maybe (ValueOf c)) -> Map (KeyOf c) (Maybe (ValueOf c))
+       )
     -> Workspace c
     -> Workspace c
 overWorkspace f (Workspace ws) = Workspace (f ws)
@@ -123,6 +125,9 @@ data TransactionInstruction m cf t op a where
         => t c
         -> Cursor (Transaction m cf t op) c a
         -> TransactionInstruction m cf t op a
+    Reset
+        :: Maybe (t c)
+        -> TransactionInstruction m cf t op ()
 
 -- | Transaction operational monad
 type Transaction m cf t op =
@@ -168,6 +173,9 @@ iterating
     -- ^ cursor operations
     -> Transaction m cf t op a
 iterating t cursorProg = singleton $ Iterating t cursorProg
+
+reset :: Maybe (t c) -> Transaction m cf t op ()
+reset mc = singleton $ Reset mc
 
 interpretQuery
     :: (GCompare t, Ord (KeyOf f), MonadFail m)
@@ -229,6 +237,14 @@ interpretIterating t cursorProg = Context $ do
             column
             cursorProg
 
+interpretReset
+    :: (Monad m, GCompare t) => Maybe (t c) -> Context cf t op m ()
+interpretReset mc =
+    Context $ modify $ case mc of
+        Just t ->
+            DMap.adjust (const (Workspace Map.empty)) t
+        Nothing -> DMap.map (const (Workspace Map.empty))
+
 -- | Interpret the transaction as a value in the Context monad
 interpretTransaction
     :: (GCompare t, MonadFail m)
@@ -251,6 +267,9 @@ interpretTransaction prog = do
             Iterating t cursorProg -> do
                 r <- interpretIterating t cursorProg
                 interpretTransaction (k r)
+            Reset mc -> do
+                interpretReset mc
+                interpretTransaction (k ())
 
 -- | Run a transaction in the given database context
 runTransactionUnguarded
