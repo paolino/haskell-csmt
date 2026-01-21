@@ -300,9 +300,9 @@ newtype RunTransaction m cf t op = RunTransaction
 
 -- | Create a new RunTransaction that serializes transactions on the given database
 newRunTransaction
-    :: (GCompare t, MonadFail m, MonadIO m, MonadMask m)
-    => Database m cf t op
-    -> m (RunTransaction m cf t op)
+    :: (MonadIO m, MonadIO n, MonadMask n, GCompare t, MonadFail n)
+    => Database n cf t op
+    -> m (RunTransaction n cf t op)
 newRunTransaction db = do
     lock <- liftIO $ newMVar ()
     pure $ RunTransaction $ \tx -> do
