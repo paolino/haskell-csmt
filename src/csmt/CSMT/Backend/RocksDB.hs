@@ -1,8 +1,5 @@
-{-# LANGUAGE StrictData #-}
-
 module CSMT.Backend.RocksDB
     ( withRocksDB
-    , mkRocksDBDatabase
     , RocksDB
     , RunRocksDB (..)
     , unsafeWithRocksDB
@@ -22,9 +19,8 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Reader (ReaderT (..), ask)
 import Database.KV.Database
     ( Database (..)
-    , Pos (..)
-    , QueryIterator (..)
     )
+import Database.KV.RocksDB (mkRocksDBDatabase)
 import Database.KV.Transaction
     ( Codecs (..)
     , Column (..)
@@ -33,57 +29,14 @@ import Database.KV.Transaction
     , mkCols
     )
 import Database.RocksDB
-    ( BatchOp (DelCF, PutCF)
+    ( BatchOp
     , ColumnFamily
     , Config (..)
-    , DB (DB, columnFamilies)
-    , createIterator
-    , destroyIterator
-    , getCF
-    , iterEntry
-    , iterFirst
-    , iterLast
-    , iterNext
-    , iterPrev
-    , iterSeek
-    , iterValid
+    , DB (..)
     , withDBCF
-    , write
     )
 
 type RocksDB = ReaderT DB IO
-
-mkRocksDBDatabase
-    :: MonadIO m
-    => DB
-    -> DMap t (Column ColumnFamily)
-    -> Database m ColumnFamily t BatchOp
-mkRocksDBDatabase db columns =
-    Database
-        { valueAt = \cf k -> do
-            getCF db cf k
-        , applyOps = \ops -> do
-            write db ops
-        , mkOperation = \cf k mv ->
-            case mv of
-                Just v -> PutCF cf k v
-                Nothing -> DelCF cf k
-        , columns
-        , newIterator = \cf -> do
-            i <- createIterator db $ Just cf
-            return
-                $ QueryIterator
-                    { isValid = liftIO $ iterValid i
-                    , entry = liftIO $ iterEntry i
-                    , step = \pos -> liftIO $ case pos of
-                        PosFirst -> iterFirst i
-                        PosLast -> iterLast i
-                        PosNext -> iterNext i
-                        PosPrev -> iterPrev i
-                        PosAny k -> iterSeek i k
-                        PosDestroy -> destroyIterator i
-                    }
-        }
 
 standaloneRocksDBCols
     :: StandaloneCodecs k v a

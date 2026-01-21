@@ -3,7 +3,6 @@ module CSMT.Backend.RocksDB.TransactionSpec
     )
 where
 
-import CSMT.Backend.RocksDB (mkRocksDBDatabase)
 import Control.Lens (prism')
 import Control.Monad.Trans.Class (MonadTrans (..))
 import Data.ByteString (ByteString)
@@ -21,6 +20,7 @@ import Database.KV.Cursor
     , prevEntry
     )
 import Database.KV.Database (mkColumns)
+import Database.KV.RocksDB (mkRocksDBDatabase)
 import Database.KV.Transaction
     ( Codecs (..)
     , DMap

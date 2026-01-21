@@ -74,6 +74,7 @@ library
     , containers
     , crypton
     , csmt:kv-transactions
+    , csmt:rocksdb-kv-transactions
     , exceptions
     , haskeline
     , lens
@@ -107,6 +108,18 @@ library kv-transactions
     , transformers
 
   hs-source-dirs:   src/kv-transactions/
+  default-language: Haskell2010
+
+library rocksdb-kv-transactions
+  import:           warnings
+  visibility:       public
+  exposed-modules:  Database.KV.RocksDB
+  build-depends:
+    , base
+    , csmt:kv-transactions
+    , rocksdb-haskell-jprupp
+
+  hs-source-dirs:   src/rocksdb-kv-transactions/
   default-language: Haskell2010
 
 executable csmt
@@ -147,6 +160,7 @@ test-suite unit-tests
     , containers
     , csmt
     , csmt:kv-transactions
+    , csmt:rocksdb-kv-transactions
     , csmt:test-lib
     , data-default
     , filepath

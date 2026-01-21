@@ -76,8 +76,7 @@ newtype Workspace c = Workspace (Map (KeyOf c) (Maybe (ValueOf c)))
 
 -- modify workspace
 overWorkspace
-    :: ( Map (KeyOf c) (Maybe (ValueOf c)) -> Map (KeyOf c) (Maybe (ValueOf c))
-       )
+    :: (Map (KeyOf c) (Maybe (ValueOf c)) -> Map (KeyOf c) (Maybe (ValueOf c)))
     -> Workspace c
     -> Workspace c
 overWorkspace f (Workspace ws) = Workspace (f ws)
