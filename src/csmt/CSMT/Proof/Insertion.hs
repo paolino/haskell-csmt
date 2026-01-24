@@ -1,5 +1,18 @@
 {-# LANGUAGE StrictData #-}
 
+-- |
+-- Module      : CSMT.Proof.Insertion
+-- Description : Merkle inclusion proof generation and verification
+-- Copyright   : (c) Paolo Veronelli, 2024
+-- License     : Apache-2.0
+--
+-- This module provides functionality for generating and verifying Merkle
+-- inclusion proofs. An inclusion proof demonstrates that a specific value
+-- exists in the tree and contributes to the root hash.
+--
+-- A proof consists of a sequence of sibling hashes along the path from
+-- the target value to the root, allowing verification without access to
+-- the full tree.
 module CSMT.Proof.Insertion
     ( Proof (..)
     , ProofStep (..)
@@ -30,20 +43,41 @@ import Database.KV.Transaction
     , query
     )
 
+-- |
+-- A single step in an inclusion proof.
+--
+-- Each step records:
+-- * The direction taken at this branch
+-- * The jump path at this node
+-- * The sibling's indirect value (needed to recompute parent hash)
 data ProofStep a = ProofStep
     { stepDirection :: Direction
+    -- ^ Direction taken at this branch
     , stepJump :: Key
+    -- ^ Jump path at this node
     , stepSibiling :: Indirect a
+    -- ^ Sibling indirect value
     }
     deriving (Show, Eq)
 
+-- |
+-- A complete inclusion proof from a leaf to the root.
+--
+-- Contains all the sibling information needed to recompute the root hash
+-- from a leaf value.
 data Proof a = Proof
     { proofSteps :: [ProofStep a]
+    -- ^ Steps from leaf to root
     , proofRootJump :: Key
+    -- ^ Jump path at the root node
     }
     deriving (Show, Eq)
 
--- | Collect a proof for the presence of a key in the CSMT
+-- |
+-- Generate an inclusion proof for a key in the CSMT.
+--
+-- Traverses from root to the target key, collecting sibling hashes at each
+-- branch. Returns 'Nothing' if the key is not in the tree.
 mkInclusionProof
     :: (Monad m, GCompare d)
     => FromKV k v a
@@ -73,7 +107,12 @@ mkInclusionProof FromKV{fromK} sel k = runMaybeT $ do
                 (u <> (x : jump))
                 (drop (length jump) ks)
 
--- | Fold a proof into a single value
+-- |
+-- Fold a proof to compute the expected root hash.
+--
+-- Starting from the leaf value, combines it with each sibling hash
+-- using the tree's hashing functions to compute what the root hash
+-- should be if the proof is valid.
 foldProof :: Hashing a -> a -> Proof a -> a
 foldProof hashing value Proof{proofSteps, proofRootJump} =
     rootHash hashing (Indirect proofRootJump rootValue)
@@ -86,7 +125,11 @@ foldProof hashing value Proof{proofSteps, proofRootJump} =
             (Indirect stepJump acc)
             stepSibiling
 
--- | Verify a proof of given the included value
+-- |
+-- Verify an inclusion proof against the current tree root.
+--
+-- Computes the expected root hash from the proof and compares it to the
+-- actual root hash in the tree. Returns 'True' if they match.
 verifyInclusionProof
     :: (Eq a, Monad m, GCompare d)
     => FromKV k v a
