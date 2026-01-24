@@ -17,11 +17,10 @@ plugins:
   - asciinema-player
 
 markdown_extensions:
-  - callouts
+  - admonition
   - tables
   - footnotes
   - def_list
-  - mkdocs_graphviz
   - pymdownx.highlight
   - pymdownx.inlinehilite
   - pymdownx.snippets
@@ -40,10 +39,14 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Getting Started:
+    - Installation: installation.md
+    - Concepts: concepts.md
   - Architecture:
     - System: architecture/system.md
     - Storage: architecture/storage.md
     - Encodings: architecture/encodings.md
     - Example: architecture/example.md
-
-  - Manual: manual.md
+  - Usage:
+    - CLI Manual: manual.md
+    - Library API: library.md
