@@ -1,6 +1,6 @@
 site_name: CSMT Documentation
-site_url: https://paolino.github.io/csmt/
-repo_url: https://github.com/paolino/csmt
+site_url: https://paolino.github.io/haskell-csmt/
+repo_url: https://github.com/paolino/haskell-csmt
 
 theme:
   name: material
