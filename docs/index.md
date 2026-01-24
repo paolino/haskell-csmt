@@ -1,11 +1,13 @@
+!!! warning
+    This project is in early development and is not production-ready. Use at your own risk.
 
-WARNING: This project is in early development and is not production-ready. Use at your own risk.
-
-# CSMT haskell library and http service
+# CSMT - Compact Sparse Merkle Tree
 
 [![CI](https://github.com/paolino/csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/CI.yaml) [![Build and deploy documentation](https://github.com/paolino/csmt/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/deploy-docs.yaml)
 
 ## What is CSMT?
+
+A Compact Sparse Merkle Tree is a space-efficient variant of a Merkle tree optimized for sparse key spaces. It enables cryptographic proofs of inclusion (or exclusion) while minimizing storage requirements through path compression.
 
 ```asciinema-player
 { "file": "assets/asciinema/bootstrap.cast"
@@ -14,12 +16,13 @@ WARNING: This project is in early development and is not production-ready. Use a
 }
 ```
 
-This package provides (or will):
+## Features
 
-- A Haskell library implementing a Compact Sparse Merkle Tree (CSMT) data structure with support for persistent storage backends. It offers efficient insertion, deletion, and proof generation functionalities, making it suitable for applications requiring verifiable data structures.
-- A CLI tool for interacting with the CSMT, allowing users to perform operations such as adding and removing elements, generating proofs, and verifying membership within the tree.
-- An HTTP service that exposes the CSMT functionalities via a RESTful API, enabling remote interaction with the tree for various applications.
-- A storage for the preimage of the hashes in sync with the CSMT tree.
+This package provides:
+
+- **Haskell Library**: A CSMT implementation with persistent storage backends, offering efficient insertion, deletion, and proof generation for applications requiring verifiable data structures.
+- **CLI Tool**: Interactive command-line interface for tree operations including adding/removing elements, generating proofs, and verifying membership.
+- **Preimage Storage**: Automatic storage of key-value preimages in sync with the CSMT, enabling value retrieval alongside proof verification.
 
 ## Performance
 
@@ -27,28 +30,44 @@ Preliminary benchmarks indicate that the CSMT library sustains a throughput of 9
 
 There is room for optimization via parallel insertions, but these results are promising for an initial implementation.
 
+## Quick Start
+
+=== "CLI"
+    ```bash
+    export CSMT_DB_PATH=./mydb
+    csmt
+    > i key1 value1
+    > q key1
+    AQDjun1C8tTl1kdY1oon8sAQWL86/UMiJyZFswQ9Sf49XQAA
+    ```
+
+=== "Library"
+    ```haskell
+    import CSMT
+    import CSMT.Backend.RocksDB
+
+    main = withRocksDB "mydb" 256 256 $ \runDB -> do
+        runDB $ runTransaction $
+            insert fromKVHashes kvCol csmtCol "key" "value"
+    ```
+
 ## Status
 
-- Library
-    - [x] Insertion
-    - [x] Deletion
-    - [x] Proof generation
-    - [x] Proof verification
-    - [x] Persistent storage backend support
-    - [x] Comprehensive tests
-    - [x] Insertion benchmarks
-    - [ ] Deletion benchmarks
-    - [ ] Proof generation benchmarks
-    - [ ] Proof verification benchmarks
-    - [ ] Production grade tests
-    - [ ] Raw key support (vs hashed keys)
-    - [ ] Partial key support
-- CLI tool
-    - [x] Add elements
-    - [x] Remove elements
-    - [x] Query elements
-    - [x] Generate proofs
-    - [x] Verify membership
-- HTTP service
-    - [ ] RESTful API for CSMT operations
-    - [ ] Documentation of API endpoints
+### Library
+- [x] Insertion and deletion
+- [x] Proof generation and verification
+- [x] Persistent storage (RocksDB)
+- [x] Comprehensive tests
+- [x] Insertion benchmarks
+- [ ] Deletion/proof benchmarks
+- [ ] Production-grade testing
+- [ ] Raw key support (vs hashed keys)
+
+### CLI Tool
+- [x] Add/remove elements
+- [x] Query elements
+- [x] Generate and verify proofs
+
+### Planned
+- [ ] HTTP service with RESTful API
+- [ ] Parallel batch insertions
