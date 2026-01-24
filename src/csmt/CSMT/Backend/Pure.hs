@@ -51,7 +51,7 @@ import Database.KV.Transaction
     , DMap
     , DSum (..)
     , Transaction
-    , mkCols
+    , fromPairList
     , runTransactionUnguarded
     )
 
@@ -179,7 +179,7 @@ standalonePureCols
     :: StandaloneCodecs k v a
     -> DMap (Standalone k v a) (Column StandaloneCF)
 standalonePureCols StandaloneCodecs{keyCodec = pk, valueCodec = pv, nodeCodec = pa} =
-    mkCols
+    fromPairList
         [ StandaloneKVCol
             :=> Column
                 { family = StandaloneKV
