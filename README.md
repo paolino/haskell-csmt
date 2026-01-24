@@ -1,7 +1,7 @@
 # CSMT - Compact Sparse Merkle Tree
 
-[![CI](https://github.com/paolino/csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/CI.yaml)
-[![Documentation](https://github.com/paolino/csmt/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/deploy-docs.yaml)
+[![CI](https://github.com/paolino/haskell-csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/haskell-csmt/actions/workflows/CI.yaml)
+[![Documentation](https://github.com/paolino/haskell-csmt/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/paolino/haskell-csmt/actions/workflows/deploy-docs.yaml)
 
 A Haskell library implementing a Compact Sparse Merkle Tree (CSMT) data structure with persistent storage backends.
 
@@ -71,7 +71,7 @@ NrJMih3czFriydMUwvFKFK6VYKZYVjKpKGe1WC4e+VU=
 
 ## Documentation
 
-Full documentation is available at [paolino.github.io/csmt](https://paolino.github.io/csmt/)
+Full documentation is available at [paolino.github.io/haskell-csmt](https://paolino.github.io/haskell-csmt/)
 
 ## Performance
 

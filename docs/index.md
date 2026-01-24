@@ -3,7 +3,7 @@
 
 # CSMT - Compact Sparse Merkle Tree
 
-[![CI](https://github.com/paolino/csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/CI.yaml) [![Build and deploy documentation](https://github.com/paolino/csmt/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/paolino/csmt/actions/workflows/deploy-docs.yaml)
+[![CI](https://github.com/paolino/haskell-csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/haskell-csmt/actions/workflows/CI.yaml) [![Build and deploy documentation](https://github.com/paolino/haskell-csmt/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/paolino/haskell-csmt/actions/workflows/deploy-docs.yaml)
 
 ## What is CSMT?
 
