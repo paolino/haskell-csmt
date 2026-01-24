@@ -16,7 +16,7 @@
 module CSMT.Proof.Insertion
     ( Proof (..)
     , ProofStep (..)
-    , mkInclusionProof
+    , buildInclusionProof
     , foldProof
     , verifyInclusionProof
     )
@@ -29,7 +29,7 @@ import CSMT.Interface
     , Indirect (..)
     , Key
     , addWithDirection
-    , opposite
+    , oppositeDirection
     )
 import Control.Monad.Trans.Maybe (MaybeT (MaybeT, runMaybeT))
 import Data.Foldable (Foldable (..))
@@ -55,7 +55,7 @@ data ProofStep a = ProofStep
     -- ^ Direction taken at this branch
     , stepJump :: Key
     -- ^ Jump path at this node
-    , stepSibiling :: Indirect a
+    , stepSibling :: Indirect a
     -- ^ Sibling indirect value
     }
     deriving (Show, Eq)
@@ -78,13 +78,13 @@ data Proof a = Proof
 --
 -- Traverses from root to the target key, collecting sibling hashes at each
 -- branch. Returns 'Nothing' if the key is not in the tree.
-mkInclusionProof
+buildInclusionProof
     :: (Monad m, GCompare d)
     => FromKV k v a
     -> Selector d Key (Indirect a)
     -> k
     -> Transaction m cf d ops (Maybe (Proof a))
-mkInclusionProof FromKV{fromK} sel k = runMaybeT $ do
+buildInclusionProof FromKV{fromK} sel k = runMaybeT $ do
     let key = fromK k
     Indirect jump _ <- MaybeT $ query sel []
     guard $ isPrefixOf jump key
@@ -95,12 +95,12 @@ mkInclusionProof FromKV{fromK} sel k = runMaybeT $ do
     go u (x : ks) = do
         Indirect jump _ <- MaybeT $ query sel (u <> [x])
         guard $ isPrefixOf jump ks
-        stepSibiling <- MaybeT $ query sel (u <> [opposite x])
+        stepSibling <- MaybeT $ query sel (u <> [oppositeDirection x])
         let step =
                 ProofStep
                     { stepDirection = x
                     , stepJump = jump
-                    , stepSibiling
+                    , stepSibling
                     }
         (step :)
             <$> go
@@ -118,12 +118,12 @@ foldProof hashing value Proof{proofSteps, proofRootJump} =
     rootHash hashing (Indirect proofRootJump rootValue)
   where
     rootValue = foldl' step value proofSteps
-    step acc ProofStep{stepDirection, stepSibiling, stepJump} =
+    step acc ProofStep{stepDirection, stepSibling, stepJump} =
         addWithDirection
             hashing
             stepDirection
             (Indirect stepJump acc)
-            stepSibiling
+            stepSibling
 
 -- |
 -- Verify an inclusion proof against the current tree root.

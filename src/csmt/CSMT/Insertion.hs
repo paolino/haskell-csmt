@@ -18,7 +18,7 @@
 -- are computed, allowing for efficient batch processing of changes.
 module CSMT.Insertion
     ( inserting
-    , mkCompose
+    , buildComposeTree
     , scanCompose
     , Compose (..)
     )
@@ -31,7 +31,7 @@ import CSMT.Interface
     , Indirect (..)
     , Key
     , compareKeys
-    , opposite
+    , oppositeDirection
     )
 import Database.KV.Transaction
     ( GCompare
@@ -81,7 +81,7 @@ inserting
     -> Transaction m cf d ops ()
 inserting FromKV{fromK, fromV} hashing kVCol csmtCol k v = do
     insert kVCol k v
-    c <- mkCompose csmtCol (fromK k) (fromV v)
+    c <- buildComposeTree csmtCol (fromK k) (fromV v)
     mapM_ (uncurry $ insert csmtCol) $ snd $ scanCompose hashing c
 
 -- |
@@ -111,14 +111,14 @@ scanCompose Hashing{combineHash} = go []
 -- * Empty slots - create a new leaf
 -- * Existing values - split nodes as needed
 -- * Path compression - maintain compact representation
-mkCompose
+buildComposeTree
     :: forall a d ops cf m
      . (Monad m, GCompare d)
     => Selector d Key (Indirect a)
     -> Key
     -> a
     -> Transaction m cf d ops (Compose a)
-mkCompose csmtCol key h = go key [] pure
+buildComposeTree csmtCol key h = go key [] pure
   where
     go [] _ cont = cont $ Leaf $ Indirect [] h
     go target current cont = do
@@ -130,7 +130,7 @@ mkCompose csmtCol key h = go key [] pure
                 case (other, us) of
                     ([], []) -> cont $ Leaf $ Indirect common h
                     ([], z : zs) -> do
-                        mov <- query csmtCol (current <> common <> [opposite z])
+                        mov <- query csmtCol (current <> common <> [oppositeDirection z])
                         case mov of
                             Nothing -> error "a jump pointed to a non-existing node"
                             Just i ->

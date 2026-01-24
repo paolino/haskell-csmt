@@ -54,9 +54,9 @@ import CSMT
     , Proof
     , Standalone (..)
     , StandaloneCodecs (..)
+    , buildInclusionProof
     , inserting
     , keyPrism
-    , mkInclusionProof
     , verifyInclusionProof
     )
 import CSMT.Backend.Pure
@@ -232,7 +232,7 @@ proofM
     -> Pure (Maybe (Proof a))
 proofM codecs fromKV k =
     runTransactionUnguarded (pureDatabase codecs)
-        $ mkInclusionProof fromKV StandaloneCSMTCol k
+        $ buildInclusionProof fromKV StandaloneCSMTCol k
 
 verifyM
     :: Eq a
