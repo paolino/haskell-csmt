@@ -26,7 +26,7 @@ import Database.KV.Transaction
     , Column (..)
     , DMap
     , DSum (..)
-    , mkCols
+    , fromPairList
     )
 import Database.RocksDB
     ( BatchOp
@@ -45,7 +45,7 @@ standaloneRocksDBCols
 standaloneRocksDBCols
     StandaloneCodecs{keyCodec, valueCodec, nodeCodec = pa}
     [kvcf, csmtcf] =
-        mkCols
+        fromPairList
             [ StandaloneKVCol
                 :=> Column
                     { family = kvcf

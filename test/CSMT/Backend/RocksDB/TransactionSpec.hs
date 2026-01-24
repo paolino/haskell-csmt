@@ -30,9 +30,9 @@ import Database.KV.Transaction
     , GOrdering (..)
     , KV
     , Transaction
+    , fromPairList
     , insert
     , iterating
-    , mkCols
     , query
     , runTransactionUnguarded
     )
@@ -83,7 +83,7 @@ instance GEq Tables where
 -- index codecs by table type
 codecs :: DMap Tables Codecs
 codecs =
-    mkCols
+    fromPairList
         [ Words :=> kvCodec
         , Lenghts :=> knCodec
         ]

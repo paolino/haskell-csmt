@@ -73,54 +73,19 @@ library
     , cereal
     , containers
     , crypton
-    , csmt:kv-transactions
-    , csmt:rocksdb-kv-transactions
     , exceptions
     , haskeline
     , lens
     , memory
     , opt-env-conf
     , rocksdb-haskell-jprupp
+    , rocksdb-kv-transactions
+    , rocksdb-kv-transactions:kv-transactions
     , transformers
 
   hs-source-dirs:   src/csmt/
   default-language: Haskell2010
   other-modules:    Paths_csmt
-
-library kv-transactions
-  import:           warnings
-  visibility:       public
-  exposed-modules:
-    Database.KV.Cursor
-    Database.KV.Database
-    Database.KV.Query
-    Database.KV.Transaction
-
-  build-depends:
-    , base
-    , bytestring
-    , containers
-    , dependent-map
-    , dependent-sum
-    , exceptions
-    , lens
-    , operational
-    , transformers
-
-  hs-source-dirs:   src/kv-transactions/
-  default-language: Haskell2010
-
-library rocksdb-kv-transactions
-  import:           warnings
-  visibility:       public
-  exposed-modules:  Database.KV.RocksDB
-  build-depends:
-    , base
-    , csmt:kv-transactions
-    , rocksdb-haskell-jprupp
-
-  hs-source-dirs:   src/rocksdb-kv-transactions/
-  default-language: Haskell2010
 
 executable csmt
   import:           warnings
@@ -141,10 +106,10 @@ library test-lib
     , bytestring
     , cereal
     , csmt
-    , csmt:kv-transactions
     , free
     , lens
     , QuickCheck
+    , rocksdb-kv-transactions:kv-transactions
 
   hs-source-dirs:   test-lib
   default-language: Haskell2010
@@ -159,8 +124,6 @@ test-suite unit-tests
     , cereal
     , containers
     , csmt
-    , csmt:kv-transactions
-    , csmt:rocksdb-kv-transactions
     , csmt:test-lib
     , data-default
     , filepath
@@ -168,6 +131,8 @@ test-suite unit-tests
     , lens
     , QuickCheck
     , rocksdb-haskell-jprupp
+    , rocksdb-kv-transactions
+    , rocksdb-kv-transactions:kv-transactions
     , temporary
     , transformers
 
@@ -195,10 +160,10 @@ benchmark bench
     , base
     , bytestring
     , csmt
-    , csmt:kv-transactions
     , deepseq
     , filepath
     , miniterion
+    , rocksdb-kv-transactions:kv-transactions
     , temporary
 
 executable space-leak
@@ -209,6 +174,6 @@ executable space-leak
     , base
     , bytestring
     , csmt
-    , csmt:kv-transactions
+    , rocksdb-kv-transactions:kv-transactions
 
   default-language: Haskell2010
