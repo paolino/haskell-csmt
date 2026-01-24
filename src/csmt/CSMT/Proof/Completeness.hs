@@ -1,5 +1,17 @@
 {-# LANGUAGE StrictData #-}
 
+-- |
+-- Module      : CSMT.Proof.Completeness
+-- Description : Completeness proofs for CSMTs
+-- Copyright   : (c) Paolo Veronelli, 2024
+-- License     : Apache-2.0
+--
+-- This module provides functionality for completeness proofs - proving
+-- that a set of values comprises the entire tree contents.
+--
+-- A completeness proof is a sequence of merge operations that, when
+-- applied to a list of leaf values, produces the root hash. This allows
+-- clients to verify they have received all values in the tree.
 module CSMT.Proof.Completeness
     ( CompletenessProof
     , foldProof
@@ -23,22 +35,33 @@ import Database.KV.Transaction
     , query
     )
 
--- | The input for a program to compute the root of a CSMT given all the values
+-- |
+-- A completeness proof as a sequence of merge operations.
+--
+-- Each pair (i, j) indicates that values at indices i and j should be
+-- combined to produce a parent hash. The final result should match the root.
 type CompletenessProof = [(Int, Int)]
 
--- A function to compose two facts, some kind of project + concatenate + hash
+-- | A function to compose two indirect values into a combined hash.
 type Compose a = Indirect a -> Indirect a -> a
 
--- | This should be implemented as part of verifying a completeness proof on the client side
--- which probably will not use this lbrary directly.
+-- |
+-- Verify a completeness proof by folding the merge operations.
+--
+-- Takes a list of leaf values and applies the proof's merge operations
+-- to compute the root. Returns 'Nothing' if the proof is invalid.
+--
+-- This function is intended for client-side verification where the client
+-- receives the list of all values and the proof.
 foldProof
     :: Compose a
-    -- ^ function to compose two Indirect values
+    -- ^ Function to compose two Indirect values
     -> [Indirect a]
-    -- ^ list of indirect values that make up the CSMT under the internal root
+    -- ^ List of indirect values (leaves of the CSMT)
     -> CompletenessProof
-    -- ^ proof steps to validate completeness, Nothing signal length mismatches
+    -- ^ Proof steps (merge operations to apply)
     -> Maybe (Indirect a)
+    -- ^ Computed root, or Nothing if proof is invalid
 foldProof compose values = go (Map.fromList $ zip [0 ..] values)
   where
     go m [] = Just $ m Map.! 0
@@ -61,9 +84,15 @@ foldProof compose values = go (Map.fromList $ zip [0 ..] values)
                         go m' xs
                 _ -> Nothing
 
+-- | Error type for malformed trees (unused, kept for documentation).
 data TreeWithDifferentLengthsError = TreeWithDifferentLengthsError
     deriving (Show)
 
+-- |
+-- Collect all leaf values from a subtree.
+--
+-- Traverses the tree depth-first, collecting all leaf indirect values
+-- with their full paths from the given starting key.
 collectValues
     :: (Monad m, GCompare d)
     => Selector d Key (Indirect a)
@@ -87,6 +116,11 @@ collectValues sel = go
                                         <> (prefix [R] <$> r)
                                     )
 
+-- |
+-- Generate a completeness proof for a subtree.
+--
+-- Traverses the tree and generates a sequence of merge operations that,
+-- when applied to the collected leaf values, will produce the root hash.
 generateProof
     :: forall m d a cf op
      . (Monad m, GCompare d)

@@ -1,3 +1,19 @@
+-- |
+-- Module      : CSMT.Deletion
+-- Description : Deletion algorithm for Compact Sparse Merkle Trees
+-- Copyright   : (c) Paolo Veronelli, 2024
+-- License     : Apache-2.0
+--
+-- This module implements the deletion algorithm for CSMTs.
+--
+-- The deletion process:
+--
+-- 1. Build a 'DeletionPath' representing the path to the value being deleted
+-- 2. Convert the path to database operations (deletions and updates)
+-- 3. Apply all operations atomically
+--
+-- When a value is deleted, the tree structure may need to be compacted
+-- by extending jump paths where branches become unnecessary.
 module CSMT.Deletion
     ( deleting
     , newDeletionPath
@@ -27,12 +43,31 @@ import Database.KV.Transaction
     , query
     )
 
+-- |
+-- A path through the tree to a value being deleted.
+--
+-- * 'Value' - The leaf node containing the value to delete
+-- * 'Branch' - An internal node along the path, recording the sibling
+--   that will need to be updated after deletion
+--
+-- This structure captures the entire path from root to leaf, which is
+-- needed to properly update parent hashes after deletion.
 data DeletionPath a where
+    -- | A leaf node with its jump path and value
     Value :: Key -> a -> DeletionPath a
+    -- | A branch node with jump path, direction taken, child path, and sibling
     Branch
         :: Key -> Direction -> DeletionPath a -> Indirect a -> DeletionPath a
     deriving (Show, Eq)
 
+-- |
+-- Delete a key-value pair from the CSMT.
+--
+-- This function:
+--
+-- 1. Builds a deletion path from root to the target key
+-- 2. Removes the key from the KV store
+-- 3. Updates the tree structure and recomputes affected hashes
 deleting
     :: (Monad m, Ord k, GCompare d)
     => FromKV k v a
@@ -48,6 +83,8 @@ deleting FromKV{fromK} hashing kvSel csmtSel key = do
         Just path -> do
             delete kvSel key
             mapM_ (applyOp csmtSel) $ deletionPathToOps hashing path
+
+-- | Apply a single database operation (insert or delete).
 applyOp
     :: GCompare d
     => Selector d Key (Indirect a)
@@ -56,6 +93,12 @@ applyOp
 applyOp csmtSel (k, Nothing) = delete csmtSel k
 applyOp csmtSel (k, Just i) = insert csmtSel k i
 
+-- |
+-- Convert a deletion path to a list of database operations.
+--
+-- Traverses the path bottom-up, computing updated hashes and generating
+-- insert/delete operations. When a branch loses one child, its sibling's
+-- jump path is extended to maintain the compact representation.
 deletionPathToOps
     :: forall a
      . Hashing a
@@ -92,6 +135,11 @@ deletionPathToOps hashing = snd . go []
                             <> xs
                         )
 
+-- |
+-- Build a deletion path for the given key.
+--
+-- Traverses the tree from root to the target key, recording each branch
+-- along the way. Returns 'Nothing' if the key does not exist in the tree.
 newDeletionPath
     :: forall a d ops cf m
      . (Monad m, GCompare d)

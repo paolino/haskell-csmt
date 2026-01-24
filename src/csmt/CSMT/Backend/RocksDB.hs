@@ -1,3 +1,15 @@
+-- |
+-- Module      : CSMT.Backend.RocksDB
+-- Description : RocksDB persistent storage backend for CSMT
+-- Copyright   : (c) Paolo Veronelli, 2024
+-- License     : Apache-2.0
+--
+-- A persistent storage backend for CSMT using RocksDB. This backend stores
+-- all data on disk, making it suitable for production use with large datasets.
+--
+-- The database uses two column families:
+-- * \"kv\" - For key-value pair storage
+-- * \"csmt\" - For CSMT node storage
 module CSMT.Backend.RocksDB
     ( withRocksDB
     , RocksDB
@@ -36,8 +48,10 @@ import Database.RocksDB
     , withDBCF
     )
 
+-- | The RocksDB monad, providing access to a RocksDB database.
 type RocksDB = ReaderT DB IO
 
+-- | Build column definitions for RocksDB from column families.
 standaloneRocksDBCols
     :: StandaloneCodecs k v a
     -> [ColumnFamily]
@@ -59,6 +73,7 @@ standaloneRocksDBCols
             ]
 standaloneRocksDBCols _ _ = error "pureCols: expected exactly two column families"
 
+-- | Create a RocksDB-backed database instance.
 standaloneRocksDBDatabase
     :: MonadIO m
     => StandaloneCodecs k v a
@@ -68,8 +83,17 @@ standaloneRocksDBDatabase codecs = do
     pure
         $ mkRocksDBDatabase db (standaloneRocksDBCols codecs columnFamilies)
 
+-- | A wrapper for running RocksDB operations in IO.
 newtype RunRocksDB = RunRocksDB (forall a. RocksDB a -> IO a)
 
+-- |
+-- Open a RocksDB database and run an action with access to it.
+-- The database is automatically closed when the action completes.
+--
+-- Parameters:
+-- * 'path' - Directory path for the database files
+-- * 'csmtMaxFiles' - Maximum open files for CSMT column family
+-- * 'kvMaxFiles' - Maximum open files for KV column family
 withRocksDB
     :: FilePath
     -> Int
@@ -84,6 +108,11 @@ withRocksDB path csmtMaxFiles kvMaxFiles action = do
         $ \db -> do
             action $ RunRocksDB $ flip runReaderT db
 
+-- |
+-- Open a RocksDB database without a scoped cleanup. Returns the database
+-- handle and a close action. The caller is responsible for closing the database.
+--
+-- This is \"unsafe\" because forgetting to call the close action will leak resources.
 unsafeWithRocksDB :: FilePath -> Int -> Int -> IO (RunRocksDB, IO ())
 unsafeWithRocksDB path csmtMaxFiles kvMaxFiles = do
     wait <- newEmptyMVar
@@ -102,6 +131,7 @@ unsafeWithRocksDB path csmtMaxFiles kvMaxFiles = do
     let close = putMVar wait ()
     pure (rdb, close >> readMVar done)
 
+-- | Default RocksDB configuration.
 def :: Config
 def =
     Config
@@ -113,6 +143,7 @@ def =
         , bloomFilter = False
         }
 
+-- | Configuration for the CSMT column family with specified max open files.
 configCSMT :: Int -> Config
 configCSMT n =
     Config
@@ -124,6 +155,7 @@ configCSMT n =
         , bloomFilter = False
         }
 
+-- | Configuration for the KV column family with specified max open files.
 configKV :: Int -> Config
 configKV n =
     Config

@@ -1,6 +1,20 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE StrictData #-}
 
+-- |
+-- Module      : CSMT.Interface
+-- Description : Core types and serialization for Compact Sparse Merkle Trees
+-- Copyright   : (c) Paolo Veronelli, 2024
+-- License     : Apache-2.0
+--
+-- This module defines the fundamental types used throughout the CSMT library:
+--
+-- * 'Key' - A path through the tree represented as a list of 'Direction's
+-- * 'Indirect' - A reference to a value with an optional jump path
+-- * 'Hashing' - Hash combination functions for building the Merkle structure
+--
+-- It also provides serialization helpers for encoding keys and indirect
+-- references to ByteStrings for storage.
 module CSMT.Interface
     ( -- * Keys
       Direction (..)
@@ -58,15 +72,17 @@ import Database.KV.Transaction
     , query
     )
 
--- | Key segment
+-- |
+-- A direction in the binary tree - either Left or Right.
+-- Keys are represented as paths through the tree using these directions.
 data Direction = L | R deriving (Show, Eq, Ord)
 
--- | Convert Bool to Direction
+-- | Convert a 'Bool' to a 'Direction'. @True@ maps to 'R', @False@ to 'L'.
 fromBool :: Bool -> Direction
 fromBool True = R
 fromBool False = L
 
--- Convert Direction to its Bool representation
+-- | Convert a 'Direction' to its 'Bool' representation. 'L' maps to @False@, 'R' to @True@.
 toBool :: Direction -> Bool
 toBool L = False
 toBool R = True
@@ -76,26 +92,39 @@ opposite :: Direction -> Direction
 opposite L = R
 opposite R = L
 
--- | Key type
+-- |
+-- A key is a path through the binary tree, represented as a list of directions.
+-- Each bit of the original key maps to a direction: 0 = L, 1 = R.
 type Key = [Direction]
 
--- | An indirect reference to a value stored at a given Key from a node
--- If the 'jump' key is empty then the value is stored at the current node
--- If the 'jump' key is non-empty then the value is stored at a descendant node
--- reachable by following the 'jump' key from the current node
+-- |
+-- An indirect reference to a value stored at a given position relative to a node.
+--
+-- * If 'jump' is empty, the value is stored at the current node
+-- * If 'jump' is non-empty, the value is stored at a descendant node
+--   reachable by following the jump path
+--
+-- This allows for path compression in sparse trees - instead of storing
+-- empty nodes, we store a jump path directly to the value.
 data Indirect a = Indirect
     { jump :: Key
     , value :: a
     }
     deriving (Show, Eq, Functor, Ord)
 
+-- | Prepend a key prefix to an indirect reference's jump path.
 prefix :: Key -> Indirect a -> Indirect a
 prefix q Indirect{jump, value} = Indirect{jump = q ++ jump, value}
 
+-- |
+-- Conversion functions for mapping external key-value types to internal
+-- tree keys and hash values.
 data FromKV k v a
     = FromKV
     { fromK :: k -> Key
+    -- ^ Convert an external key to a tree path
     , fromV :: v -> a
+    -- ^ Convert an external value to a hash
     }
 
 -- | Compare two keys and return their common prefix and the remaining suffixes
@@ -189,11 +218,21 @@ putIndirect Indirect{jump, value} = do
 getIndirect :: BA.ByteArray a => Get (Indirect a)
 getIndirect = Indirect <$> getKey <*> getSizedByteString
 
+-- |
+-- Hash combination functions for building the Merkle tree structure.
+--
+-- These functions define how hashes are computed at each node:
+--
+-- * 'rootHash' - Compute the hash of a leaf/root node from its indirect value
+-- * 'combineHash' - Combine two child hashes into a parent hash
 data Hashing a = Hashing
     { rootHash :: Indirect a -> a
+    -- ^ Hash a single indirect value (for leaf nodes)
     , combineHash :: Indirect a -> Indirect a -> a
+    -- ^ Combine left and right child hashes into parent hash
     }
 
+-- | Combine two indirect values with the given direction determining order.
 addWithDirection
     :: Hashing a -> Direction -> Indirect a -> Indirect a -> a
 addWithDirection Hashing{combineHash} L left right = combineHash left right
@@ -210,9 +249,11 @@ indirectPrism prismA =
                 Indirect{jump = k, value = a}
         )
 
+-- | Prism for encoding/decoding keys to/from ByteStrings.
 keyPrism :: Prism' ByteString Key
 keyPrism = prism' (evalPutM . putKey) (evalGetM getKey)
 
+-- | Build codecs for CSMT key-value storage given a hash prism.
 csmtCodecs :: Prism' ByteString a -> Codecs (KV Key (Indirect a))
 csmtCodecs prismA =
     Codecs

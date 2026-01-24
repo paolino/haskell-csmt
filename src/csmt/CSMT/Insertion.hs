@@ -1,5 +1,21 @@
 {-# LANGUAGE StrictData #-}
 
+-- |
+-- Module      : CSMT.Insertion
+-- Description : Insertion algorithm for Compact Sparse Merkle Trees
+-- Copyright   : (c) Paolo Veronelli, 2024
+-- License     : Apache-2.0
+--
+-- This module implements the core insertion algorithm for CSMTs.
+--
+-- The insertion process:
+--
+-- 1. Build a 'Compose' tree representing the structural changes needed
+-- 2. Scan the compose tree to compute hashes and generate database operations
+-- 3. Apply all operations atomically
+--
+-- The 'Compose' type represents a pending tree modification before hashes
+-- are computed, allowing for efficient batch processing of changes.
 module CSMT.Insertion
     ( inserting
     , mkCompose
@@ -25,18 +41,35 @@ import Database.KV.Transaction
     , query
     )
 
--- A binary tree with a Key at each node
+-- |
+-- A binary tree structure representing pending modifications.
+--
+-- * 'Compose' - An internal node with a jump key and two children
+-- * 'Leaf' - A leaf node containing an indirect reference
+--
+-- This structure captures the shape of changes before hashes are computed,
+-- allowing the insertion algorithm to build up the tree structure first
+-- and then compute all hashes in a single pass.
 data Compose a
-    = Compose Key (Compose a) (Compose a)
-    | Leaf (Indirect a)
+    = -- | Internal node with jump path and left/right children
+      Compose Key (Compose a) (Compose a)
+    | -- | Leaf node with indirect value
+      Leaf (Indirect a)
     deriving (Show, Eq)
 
--- Construct a Compose node composed of two subtrees
+-- | Construct a Compose node with children ordered by direction.
 compose :: Direction -> Key -> Compose a -> Compose a -> Compose a
 compose L j left right = Compose j left right
 compose R j left right = Compose j right left
 
--- | Insert a key-value pair into the CSMT structure
+-- |
+-- Insert a key-value pair into the CSMT.
+--
+-- This function:
+--
+-- 1. Stores the original key-value pair in the KV store
+-- 2. Builds a Compose tree representing the structural changes
+-- 3. Computes hashes and applies all CSMT updates atomically
 inserting
     :: (Monad m, Ord k, GCompare d)
     => FromKV k v a
@@ -51,7 +84,11 @@ inserting FromKV{fromK, fromV} hashing kVCol csmtCol k v = do
     c <- mkCompose csmtCol (fromK k) (fromV v)
     mapM_ (uncurry $ insert csmtCol) $ snd $ scanCompose hashing c
 
--- Scan a Compose tree and produce the resulting hash and list of inserts
+-- |
+-- Scan a Compose tree bottom-up, computing hashes and collecting database operations.
+--
+-- Returns the root indirect value and a list of (key, value) pairs to insert.
+-- Hashes are computed by combining child hashes at each internal node.
 scanCompose
     :: Hashing a -> Compose a -> (Indirect a, [(Key, Indirect a)])
 scanCompose Hashing{combineHash} = go []
@@ -65,7 +102,15 @@ scanCompose Hashing{combineHash} = go []
             i = Indirect{jump, value}
         in  (i, ls <> rs <> [(k, i)])
 
--- Build a Compose tree for inserting a value at a given key
+-- |
+-- Build a Compose tree for inserting a value at the given key.
+--
+-- Traverses the existing tree structure to find where the new value
+-- should be inserted, handling:
+--
+-- * Empty slots - create a new leaf
+-- * Existing values - split nodes as needed
+-- * Path compression - maintain compact representation
 mkCompose
     :: forall a d ops cf m
      . (Monad m, GCompare d)

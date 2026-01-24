@@ -1,10 +1,17 @@
 {-# LANGUAGE StrictData #-}
 
-{- Types and functions for a pure in-memory backend for CSMT, useful for testing.delete
-We target directly the standalone backend types and functions as this is not intended for
-library use.
- -}
-
+-- |
+-- Module      : CSMT.Backend.Pure
+-- Description : Pure in-memory backend for CSMT
+-- Copyright   : (c) Paolo Veronelli, 2024
+-- License     : Apache-2.0
+--
+-- A pure in-memory backend for CSMT, useful for testing and development.
+-- This backend stores all data in memory using 'Map' and provides a simple
+-- interface for running CSMT operations without external dependencies.
+--
+-- Not intended for production use - see "CSMT.Backend.RocksDB" for a
+-- persistent storage backend.
 module CSMT.Backend.Pure
     ( InMemoryDB (..)
     , Pure
@@ -111,7 +118,13 @@ prevCursor c@Cursor{position = Just k, snapshot} =
             Just (kprev', _) -> c{position = Just kprev'}
             Nothing -> c{position = Nothing}
 
--- | In-memory database type from keys to indirect values
+-- |
+-- In-memory database storing CSMT nodes and key-value pairs.
+--
+-- Contains three maps:
+-- * 'inMemoryCSMT' - The CSMT node storage
+-- * 'inMemoryKV' - The key-value pair storage
+-- * 'inMemoryIterators' - Active iterator cursors
 data InMemoryDB = InMemoryDB
     { inMemoryCSMT :: Map ByteString ByteString
     , inMemoryKV :: Map ByteString ByteString
@@ -119,6 +132,7 @@ data InMemoryDB = InMemoryDB
     }
     deriving (Show, Eq)
 
+-- | Parse the in-memory CSMT storage into typed Key/Indirect pairs.
 inMemoryCSMTParsed
     :: StandaloneCodecs k v a
     -> InMemoryDB
@@ -132,6 +146,7 @@ inMemoryCSMTParsed StandaloneCodecs{nodeCodec = pa} m =
             , Just aux <- [preview valueCodec vbs]
             ]
 
+-- | An empty in-memory database with no data.
 emptyInMemoryDB :: InMemoryDB
 emptyInMemoryDB = InMemoryDB Map.empty Map.empty Map.empty
 
@@ -175,6 +190,7 @@ pureApplyOps ops = forM_ ops $ \(cf, k, mv) -> case (cf, mv) of
     (StandaloneCSMT, Nothing) -> modify' $ onCSMT $ Map.delete k
     (StandaloneCSMT, Just v) -> modify' $ onCSMT $ Map.insert k v
 
+-- | Build column definitions for the pure in-memory backend.
 standalonePureCols
     :: StandaloneCodecs k v a
     -> DMap (Standalone k v a) (Column StandaloneCF)
@@ -254,6 +270,7 @@ pureIsValidIterator itId = do
         Just cursor -> pure $ isValidCursor cursor
         Nothing -> error "pureIsValidIterator: invalid iterator id"
 
+-- | Create a pure in-memory database instance.
 pureDatabase
     :: StandaloneCodecs k v a
     -> Database Pure StandaloneCF (Standalone k v a) StandaloneOp
@@ -266,6 +283,7 @@ pureDatabase codecs =
         , newIterator = pureIterator
         }
 
+-- | Run a transaction in the pure in-memory backend.
 runPureTransaction
     :: StandaloneCodecs k v a
     -> Transaction Pure StandaloneCF (Standalone k v a) StandaloneOp b
