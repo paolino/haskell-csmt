@@ -7,8 +7,8 @@ import CSMT
     ( Proof
     , Standalone (StandaloneCSMTCol, StandaloneKVCol)
     , StandaloneCodecs
+    , buildInclusionProof
     , inserting
-    , mkInclusionProof
     , verifyInclusionProof
     )
 import CSMT.Backend.RocksDB
@@ -98,7 +98,7 @@ dM =
         StandaloneCSMTCol
 
 pfM :: ByteString -> T (Maybe (Proof Hash))
-pfM = mkInclusionProof fromKVHashes StandaloneCSMTCol
+pfM = buildInclusionProof fromKVHashes StandaloneCSMTCol
 
 vpfM :: ByteString -> ByteString -> T Bool
 vpfM k v = do

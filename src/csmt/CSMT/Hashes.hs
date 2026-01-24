@@ -157,9 +157,9 @@ putProof :: Proof Hash -> PutM ()
 putProof pf = do
     putKey $ proofRootJump pf
     putWord16be (fromIntegral $ length $ proofSteps pf)
-    forM_ (proofSteps pf) $ \(ProofStep{stepDirection, stepSibiling, stepJump}) -> do
+    forM_ (proofSteps pf) $ \(ProofStep{stepDirection, stepSibling, stepJump}) -> do
         putDirection stepDirection
-        putIndirect stepSibiling
+        putIndirect stepSibling
         putKey stepJump
 
 -- | Render a proof to a ByteString.
@@ -175,9 +175,9 @@ getProof = do
         (fromIntegral len)
         $ do
             stepDirection <- getDirection
-            stepSibiling <- getIndirect
+            stepSibling <- getIndirect
             stepJump <- getKey
-            return $ ProofStep{stepDirection, stepSibiling, stepJump}
+            return $ ProofStep{stepDirection, stepSibling, stepJump}
     return $ Proof{proofSteps, proofRootJump}
 
 -- | Parse a ByteString as a proof. Returns Nothing on parse failure.
@@ -195,7 +195,7 @@ generateInclusionProof
     -> k
     -> Transaction m cf d ops (Maybe ByteString)
 generateInclusionProof csmt sel k = do
-    mp <- Proof.mkInclusionProof csmt sel k
+    mp <- Proof.buildInclusionProof csmt sel k
     pure $ fmap renderProof mp
 
 -- | Verify an inclusion proof for a value. Returns True if the proof is valid.

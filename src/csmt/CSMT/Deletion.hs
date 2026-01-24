@@ -30,7 +30,7 @@ import CSMT.Interface
     , Key
     , addWithDirection
     , compareKeys
-    , opposite
+    , oppositeDirection
     )
 import Control.Monad (guard)
 import Control.Monad.Trans.Maybe (MaybeT (..))
@@ -125,12 +125,12 @@ deletionPathToOps hashing = snd . go []
                 Nothing ->
                     let i' =
                             Indirect
-                                { jump = j <> [opposite d] <> jump i
+                                { jump = j <> [oppositeDirection d] <> jump i
                                 , value = value i
                                 }
                     in  ( Just i'
                         , [ (k, Just i')
-                          , (k <> j <> [opposite d], Nothing)
+                          , (k <> j <> [oppositeDirection d], Nothing)
                           ]
                             <> xs
                         )
@@ -160,7 +160,7 @@ newDeletionPath csmtSel = runMaybeT . go []
             [] -> pure $ Value j v
             (r : remaining'') -> do
                 let current' = current <> j
-                sibiling <-
-                    MaybeT $ query csmtSel (current' <> [opposite r])
+                sibling <-
+                    MaybeT $ query csmtSel (current' <> [oppositeDirection r])
                 p <- go (current' <> [r]) remaining''
-                pure $ Branch j r p sibiling
+                pure $ Branch j r p sibling

@@ -21,7 +21,7 @@ module CSMT.Interface
     , Key
     , keyPrism
     , compareKeys
-    , opposite
+    , oppositeDirection
 
       -- * Interface Types
     , Indirect (..)
@@ -87,10 +87,10 @@ toBool :: Direction -> Bool
 toBool L = False
 toBool R = True
 
--- | Get the opposite direction
-opposite :: Direction -> Direction
-opposite L = R
-opposite R = L
+-- | Get the oppositeDirection direction
+oppositeDirection :: Direction -> Direction
+oppositeDirection L = R
+oppositeDirection R = L
 
 -- |
 -- A key is a path through the binary tree, represented as a list of directions.

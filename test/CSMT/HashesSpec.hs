@@ -17,13 +17,13 @@ genProofs = do
     proofRootJump <- listOf $ elements [L, R]
     proofSteps <- listOf $ do
         dir <- elements [L, R]
-        sibilingValue <- mkHash . B.pack <$> listOf (elements [0 .. 255])
+        siblingValue <- mkHash . B.pack <$> listOf (elements [0 .. 255])
         stepJump <- listOf $ elements [L, R]
-        sibilingJump <- listOf $ elements [L, R]
+        siblingJump <- listOf $ elements [L, R]
         return
             $ ProofStep
                 { stepDirection = dir
-                , stepSibiling = Indirect{jump = sibilingJump, value = sibilingValue}
+                , stepSibling = Indirect{jump = siblingJump, value = siblingValue}
                 , stepJump = stepJump
                 }
     return $ Proof{proofSteps, proofRootJump}
