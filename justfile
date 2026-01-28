@@ -84,12 +84,12 @@ haddock:
     cabal haddock all
 
 # Serve mkdocs documentation locally
-docs-serve:
+serve-docs:
     #!/usr/bin/env bash
     mkdocs serve
 
 # Build mkdocs documentation
-docs-build:
+build-docs:
     #!/usr/bin/env bash
     mkdocs build
 

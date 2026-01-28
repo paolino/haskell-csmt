@@ -84,12 +84,18 @@ The library uses Blake2b-256 for hashing. Internal node hashes are computed by h
 
 ### Inclusion Proofs
 
-An inclusion proof demonstrates that a key-value pair exists in the tree. It consists of:
+An inclusion proof demonstrates that a key-value pair exists in the tree. It contains:
 
-1. The sibling hashes along the path from leaf to root
-2. The jump paths at each level
+- The key and value being proven
+- The expected root hash
+- Sibling hashes along the path from leaf to root
+- Jump paths at each level
 
-To verify, recompute the root hash from the value and siblings.
+To verify, recompute the root hash from the value and siblings, then compare
+with the expected root.
+
+See [Inclusion Proof Format](architecture/inclusion-proof.md) for the complete
+CBOR wire format specification.
 
 ### Completeness Proofs
 
