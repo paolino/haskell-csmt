@@ -3,8 +3,6 @@
 
 # CSMT - Compact Sparse Merkle Tree
 
-[![CI](https://github.com/paolino/haskell-csmt/actions/workflows/CI.yaml/badge.svg)](https://github.com/paolino/haskell-csmt/actions/workflows/CI.yaml) [![Build and deploy documentation](https://github.com/paolino/haskell-csmt/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/paolino/haskell-csmt/actions/workflows/deploy-docs.yaml)
-
 ## What is CSMT?
 
 A Compact Sparse Merkle Tree is a space-efficient variant of a Merkle tree optimized for sparse key spaces. It enables cryptographic proofs of inclusion (or exclusion) while minimizing storage requirements through path compression.
