@@ -99,25 +99,34 @@ Returns `Nothing` if the tree is empty.
 import CSMT.Hashes (generateInclusionProof, fromKVHashes)
 
 -- Generate proof for a key
-proofExample :: Transaction m cf d ops (Maybe ByteString)
+proofExample :: Transaction m cf d ops (Maybe (ByteString, ByteString))
 proofExample =
-    generateInclusionProof fromKVHashes csmtCol "mykey"
+    generateInclusionProof fromKVHashes kvCol csmtCol "mykey"
 ```
 
-Returns `Nothing` if the key doesn't exist.
+Returns `Maybe (value, proofBytes)`:
+
+- Looks up the value from the KV column
+- Returns both the value and serialized proof
+- Returns `Nothing` if the key doesn't exist
+
+This ensures the proof is always consistent with the current tree state.
 
 ### Verifying Inclusion Proofs
 
 ```haskell
-import CSMT.Hashes (verifyInclusionProof, fromKVHashes)
+import CSMT.Hashes (verifyInclusionProof)
 
--- Verify a proof
-verifyExample :: ByteString -> Transaction m cf d ops Bool
-verifyExample proofBytes =
-    verifyInclusionProof fromKVHashes csmtCol "expectedValue" proofBytes
+-- Verify a proof (pure function, no database access needed)
+verifyExample :: ByteString -> Bool
+verifyExample proofBytes = verifyInclusionProof proofBytes
 ```
 
-Returns `True` if the proof is valid for the given value.
+Returns `True` if the proof is internally consistent. The proof is self-contained
+with the key, value hash, and root hash embedded.
+
+To verify against a trusted root, parse the proof and compare `proofRootHash`
+with your known root.
 
 ## Custom Key/Value Types
 
@@ -152,20 +161,21 @@ myCodecs = StandaloneCodecs
 
 ## Column Selectors
 
-Operations use type-safe column selectors:
+Operations use type-safe column selectors from `CSMT.Backend.Standalone`:
 
 ```haskell
 import CSMT.Backend.Standalone (Standalone(..))
-import Database.KV.Transaction (Selector, sel)
 
--- KV column selector
-kvCol :: Selector (Standalone k v a) k v
-kvCol = sel StandaloneKVCol
-
--- CSMT column selector
-csmtCol :: Selector (Standalone k v a) Key (Indirect a)
-csmtCol = sel StandaloneCSMTCol
+-- Use directly as selectors
+insert fromKVHashes StandaloneKVCol StandaloneCSMTCol key value
+delete fromKVHashes StandaloneKVCol StandaloneCSMTCol key
+generateInclusionProof fromKVHashes StandaloneKVCol StandaloneCSMTCol key
 ```
+
+The GADT constructors serve as selectors:
+
+- `StandaloneKVCol` - Selects the key-value column
+- `StandaloneCSMTCol` - Selects the CSMT tree column
 
 ## Error Handling
 

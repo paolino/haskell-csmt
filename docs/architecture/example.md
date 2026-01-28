@@ -1,26 +1,20 @@
-# Example of a CSMT
+# Worked Example
 
-NOTE: Here we use integers as values and hashes and sum as concatenation.
+This example demonstrates how the CSMT stores data and computes hashes,
+applying the concepts from [Storage](./storage.md).
 
-Mapping keys to values is necessary to include the keys in the hash computation.
+## Simplified Hashing
 
-For the example we use its binary value directly. Also we map `L` to `0` and `R` to `1` for readability.
+For clarity, we use integers instead of Blake2b-256 hashes:
+
+- **Values**: Plain integers (e.g., 13, 5, 19, 23)
+- **Hash combination**: Addition instead of cryptographic hashing
+- **Key encoding**: Binary representation (L=0, R=1)
 
 
-Key values:
+## Input Data
 
-| Key | Binary | Integer |
-| --- | ------ | ------- |
-| L   | 0      | 0       |
-| R   | 1      | 1       |
-| LL  | 00     | 0       |
-| LR  | 01     | 1       |
-| RL  | 10     | 2       |
-| RR  | 11     | 3       |
-| LLR | 001    | 1       |
-| ... | ...    | ...     |
-
-Let's say we are storing the following facts:
+We insert four key-value pairs:
 
 | Key  | Value |
 | ---- | ----- |
@@ -29,36 +23,75 @@ Let's say we are storing the following facts:
 | LRRR | 19    |
 | RLRL | 23    |
 
-In the database we will have the following entries:
+## CSMT Column Storage
 
-| Reference | Partial Key | Infix | Hashing            | Computation     | Value |
-| --------- | ----------- | ----- | ------------------ | --------------- | ----- |
-| A         |             |       | _  + B  + L1 + LRL | 0 + 41 + 2 + 23 | 66    |
-| B         | L           |       | RR + L2 + R  + E   | 3 + 13 + 1 + 24 | 41    |
-| E         | LR          | R     | _  + L3 + _  + L4  | 0 + 19 + 0 + 5  | 24    |
-| L2        | LL          | RR    |                    |                 | 13    |
-| L3        | LRRL        |       |                    |                 | 5     |
-| L4        | LRRR        |       |                    |                 | 19    |
-| L1        | R           | LRL   |                    |                 | 23    |
+The tree is stored with path compression. Each entry has:
+
+- **Path prefix**: The key path to reach this node
+- **Jump**: Additional path to skip (path compression)
+- **Value/Hash**: Leaf value or computed internal hash
+
+| Node | Path Prefix | Jump | Hash | Computation |
+|------|-------------|------|------|-------------|
+| A    | []          | -    | 66   | 0 + 41 + 2 + 23 (left child + right child with jumps) |
+| B    | [L]         | -    | 41   | 3 + 13 + 1 + 24 |
+| E    | [L,R]       | [R]  | 24   | 0 + 5 + 0 + 19 |
+| L1   | [R]         | [L,R,L] | 23 | leaf value |
+| L2   | [L,L]       | [R,R] | 13 | leaf value |
+| L3   | [L,R,R,L]   | -    | 5  | leaf value |
+| L4   | [L,R,R,R]   | -    | 19 | leaf value |
+
+## Tree Visualization
 
 ```mermaid
 graph TD
-    A[A, , 66] --> |L| B[B, , 41]
-    A --> |R|L1[L1, LRL, 23]
-    B --> |L| L2[L2, RR, 13]
-    B --> |R| E[E, R, 24]
-    E --> |L| L3[L3, , 5]
-    E --> |R| L4[L4, , 19]
+    A["A: hash=66"] --> |L| B["B: hash=41"]
+    A --> |R| L1["L1: jump=LRL, val=23"]
+    B --> |L| L2["L2: jump=RR, val=13"]
+    B --> |R| E["E: jump=R, hash=24"]
+    E --> |L| L3["L3: val=5"]
+    E --> |R| L4["L4: val=19"]
 ```
 
-Where the notation is `Reference, Jump, Hash`.
+## Understanding the Structure
 
-Here we can see that
+**Leaf nodes (L1, L2, L3, L4)**: Store the actual values. L1 and L2 have jumps
+because they're the only nodes in their subtrees (path compression).
 
-- Node `A`, at root key, has two children: `B` and `L1`. Because it has no jump the keys of the 2 children `B` and `L1` are just 'L' and 'R'. Moreover its hash is computed by concatenating `B` and `L1` including their jumps
-- Node `B`, at key 'L', has two children: `L2` and `E`. Because it has no jump the keys of the 2 children `L2` and `E` are just 'LL' and 'LR'. Moreover its hash is computed by concatenating `L2` and `E` including their jumps
-- Node `E`, at key 'LR', has two children: `L3` and `L4`. Because it has jump 'R' the keys of the 2 children `L3` and `L4` are 'LRR' and 'LRR'. Moreover its hash is computed by concatenating `L3` and `L4` including their jumps
-- Node `L1` at key 'R' has no children, so its, just pointing to value 23 after jump 'LRL'
-- Node `L2` at key 'LL' has no children, so its, just pointing to value 13 after jump 'RR'
-- Node `L3` at key 'LRRL' has no children, so its, just pointing to value 5
-- Node `L4` at key 'LRRR' has no children, so its, just pointing to value 19
+**Internal node with jump (E)**: At path `[L,R]` with jump `[R]`. Children are
+L3 and L4. Hash computation:
+```
+E = jump(L3) + hash(L3) + jump(L4) + hash(L4)
+  = 0 + 5 + 0 + 19
+  = 24
+```
+
+**Internal node (B)**: At path `[L]`, children are L2 and E. Hash computation:
+```
+B = jump(L2) + hash(L2) + jump(E) + hash(E)
+  = RR + 13 + R + 24
+  = 3 + 13 + 1 + 24
+  = 41
+```
+
+**Root node (A)**: At path `[]`, children are B and L1. Hash computation:
+```
+A = jump(B) + hash(B) + jump(L1) + hash(L1)
+  = 0 + 41 + LRL + 23
+  = 0 + 41 + 2 + 23
+  = 66
+```
+
+Note: Jump values are converted to integers (L=0, R=1, then binary→decimal).
+For example, `LRL` = 010 in binary = 2 in decimal.
+
+## Path Compression in Action
+
+Notice how L1 at path `[R]` has jump `[L,R,L]`. This means the full key `RLRL`
+is stored as:
+
+- Path prefix: `[R]` (stored as the database key)
+- Jump: `[L,R,L]` (stored in the Indirect value)
+
+Without compression, we'd need intermediate nodes at `[R,L]` and `[R,L,R]`.
+The jump eliminates these unnecessary nodes.
