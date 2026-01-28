@@ -83,8 +83,8 @@ data Command
       Q ByteString
     | -- | Query hash at partial key
       QB (Maybe Key)
-    | -- | Verify inclusion proof for value and proof
-      V ByteString ByteString
+    | -- | Verify inclusion proof for key, value and proof
+      V ByteString ByteString ByteString
     | -- | Query key-value pair
       W ByteString
     | -- | Query root hash
@@ -134,8 +134,7 @@ parseCommand line =
         ["p"] -> Just (QB $ Just [])
         ["p", ks] -> Just (QB $ parseLRKey ks)
         ["w", k] -> Just (W k)
-        ["v", value] -> Just (V value "")
-        ["v", value, proof] -> Just (V value proof)
+        ["v", key, value, proof] -> Just (V key value proof)
         ["r"] -> Just R
         ["k", key] -> Just (K key)
         "#" : _comment -> Just C
@@ -204,12 +203,12 @@ core isPiped (RunTransaction run) l' = do
             pure $ case r of
                 Just rootHash -> Binary "root" rootHash
                 Nothing -> ErrorMsg TreeEmpty
-        Just (V value proof) -> do
+        Just (V key value proof) -> do
             case readHash proof of
                 Just decoded -> do
                     r <-
                         run
-                            $ verifyInclusionProof fromKVHashes StandaloneCSMTCol value decoded
+                            $ verifyInclusionProof fromKVHashes StandaloneCSMTCol key value decoded
                     pure $ ErrorMsg $ if r then Valid else Invalid
                 Nothing -> pure $ ErrorMsg InvalidProofFormat
         Just (W k) -> do
@@ -328,14 +327,13 @@ helpInteractive :: String
 helpInteractive =
     unlines
         [ "Commands:"
-        , "  i <key> <value>   Change key-value pair and print inclusion proof"
-        , "  w <key>           Query value for key in bytestring"
-        , "  d <key>           Delete key and print exclusion proof (soon)"
-        , "  q <key>           Query inclusion proof for key in bytestring"
-        , "  p <key>           Query node at partial key in directionsformat LRLRLL..."
-        , "  v <value>         Verify inclusion proof for the singleton csmt"
-        , "  v <value> <proof> Verify inclusion proof for a value"
-        , "  r                 Print root hash of the tree"
-        , "  k <key>           Show key directions"
-        , "  # <comment>       Add comment line (no operation)"
+        , "  i <key> <value>         Change key-value pair and print inclusion proof"
+        , "  w <key>                 Query value for key in bytestring"
+        , "  d <key>                 Delete key and print exclusion proof (soon)"
+        , "  q <key>                 Query inclusion proof for key in bytestring"
+        , "  p <key>                 Query node at partial key in directions LRLRLL..."
+        , "  v <key> <value> <proof> Verify inclusion proof for a key-value pair"
+        , "  r                       Print root hash of the tree"
+        , "  k <key>                 Show key directions"
+        , "  # <comment>             Add comment line (no operation)"
         ]
