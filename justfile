@@ -86,7 +86,9 @@ haddock:
 # Serve mkdocs documentation locally
 serve-docs:
     #!/usr/bin/env bash
-    mkdocs serve
+    port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
+    echo "Serving docs at http://localhost:$port"
+    mkdocs serve -a "localhost:$port"
 
 # Build mkdocs documentation
 build-docs:
