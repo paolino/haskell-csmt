@@ -42,10 +42,8 @@ import CSMT.Interface
     , Hashing (..)
     , Indirect
     , Key
-    , getDirection
     , getIndirect
     , getKey
-    , putDirection
     , putIndirect
     , putKey
     )
@@ -157,10 +155,9 @@ putProof :: Proof Hash -> PutM ()
 putProof pf = do
     putKey $ proofRootJump pf
     putWord16be (fromIntegral $ length $ proofSteps pf)
-    forM_ (proofSteps pf) $ \(ProofStep{stepDirection, stepSibling, stepJump}) -> do
-        putDirection stepDirection
+    forM_ (proofSteps pf) $ \ProofStep{stepConsumed, stepSibling} -> do
+        putWord16be (fromIntegral stepConsumed)
         putIndirect stepSibling
-        putKey stepJump
 
 -- | Render a proof to a ByteString.
 renderProof :: Proof Hash -> ByteString
@@ -174,10 +171,9 @@ getProof = do
     proofSteps <- replicateM
         (fromIntegral len)
         $ do
-            stepDirection <- getDirection
+            stepConsumed <- fromIntegral <$> getWord16be
             stepSibling <- getIndirect
-            stepJump <- getKey
-            return $ ProofStep{stepDirection, stepSibling, stepJump}
+            return $ ProofStep{stepConsumed, stepSibling}
     return $ Proof{proofSteps, proofRootJump}
 
 -- | Parse a ByteString as a proof. Returns Nothing on parse failure.
@@ -198,19 +194,21 @@ generateInclusionProof csmt sel k = do
     mp <- Proof.buildInclusionProof csmt sel k
     pure $ fmap renderProof mp
 
--- | Verify an inclusion proof for a value. Returns True if the proof is valid.
+-- | Verify an inclusion proof for a key-value pair.
+-- Returns True if the proof is valid.
 verifyInclusionProof
     :: (Monad m, GCompare d)
     => FromKV k v Hash
     -> Selector d Key (Indirect Hash)
+    -> k
     -> v
     -> ByteString
     -> Transaction m cf d ops Bool
-verifyInclusionProof csmt sel value proofBs = do
+verifyInclusionProof csmt sel key value proofBs = do
     case parseProof proofBs of
         Nothing -> pure False
         Just proof -> do
-            Proof.verifyInclusionProof csmt sel hashHashing value proof
+            Proof.verifyInclusionProof csmt sel hashHashing key value proof
 
 -- | Isomorphism between ByteString and Hash.
 isoHash :: Iso' ByteString Hash

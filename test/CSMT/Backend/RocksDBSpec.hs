@@ -106,7 +106,7 @@ vpfM k v = do
     case mp of
         Nothing -> pure False
         Just p ->
-            verifyInclusionProof fromKVHashes StandaloneCSMTCol hashHashing v p
+            verifyInclusionProof fromKVHashes StandaloneCSMTCol hashHashing k v p
 
 testRandomFactsInASparseTree
     :: RunT

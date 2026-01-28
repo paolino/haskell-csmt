@@ -12,19 +12,19 @@ import Data.ByteString qualified as B
 import Test.Hspec (Spec, describe, it, shouldBe)
 import Test.QuickCheck (Gen, Testable (..), elements, forAll, listOf)
 
+-- Note: Direction is used in generator to create random stepConsumed values
+
 genProofs :: Gen (Proof Hash)
 genProofs = do
     proofRootJump <- listOf $ elements [L, R]
     proofSteps <- listOf $ do
-        dir <- elements [L, R]
+        stepConsumed <- (+ 1) . length <$> listOf (elements [L, R])
         siblingValue <- mkHash . B.pack <$> listOf (elements [0 .. 255])
-        stepJump <- listOf $ elements [L, R]
         siblingJump <- listOf $ elements [L, R]
         return
             $ ProofStep
-                { stepDirection = dir
+                { stepConsumed
                 , stepSibling = Indirect{jump = siblingJump, value = siblingValue}
-                , stepJump = stepJump
                 }
     return $ Proof{proofSteps, proofRootJump}
 

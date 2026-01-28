@@ -23,8 +23,7 @@ module CSMT.Proof.Insertion
 where
 
 import CSMT.Interface
-    ( Direction (..)
-    , FromKV (..)
+    ( FromKV (..)
     , Hashing (..)
     , Indirect (..)
     , Key
@@ -32,7 +31,6 @@ import CSMT.Interface
     , oppositeDirection
     )
 import Control.Monad.Trans.Maybe (MaybeT (MaybeT, runMaybeT))
-import Data.Foldable (Foldable (..))
 import Data.List (isPrefixOf)
 
 import Control.Monad (guard)
@@ -47,14 +45,13 @@ import Database.KV.Transaction
 -- A single step in an inclusion proof.
 --
 -- Each step records:
--- * The direction taken at this branch
--- * The jump path at this node
+-- * The number of key bits consumed at this step (direction + jump length)
 -- * The sibling's indirect value (needed to recompute parent hash)
+--
+-- The direction and jump path are derived from the key during verification.
 data ProofStep a = ProofStep
-    { stepDirection :: Direction
-    -- ^ Direction taken at this branch
-    , stepJump :: Key
-    -- ^ Jump path at this node
+    { stepConsumed :: Int
+    -- ^ Number of key bits consumed (1 for direction + jump length)
     , stepSibling :: Indirect a
     -- ^ Sibling indirect value
     }
@@ -98,8 +95,7 @@ buildInclusionProof FromKV{fromK} sel k = runMaybeT $ do
         stepSibling <- MaybeT $ query sel (u <> [oppositeDirection x])
         let step =
                 ProofStep
-                    { stepDirection = x
-                    , stepJump = jump
+                    { stepConsumed = 1 + length jump
                     , stepSibling
                     }
         (step :)
@@ -113,17 +109,36 @@ buildInclusionProof FromKV{fromK} sel k = runMaybeT $ do
 -- Starting from the leaf value, combines it with each sibling hash
 -- using the tree's hashing functions to compute what the root hash
 -- should be if the proof is valid.
-foldProof :: Hashing a -> a -> Proof a -> a
-foldProof hashing value Proof{proofSteps, proofRootJump} =
+--
+-- The key is required to derive the direction and jump path at each step.
+-- Since proof steps are ordered leaf-to-root but the key is root-to-leaf,
+-- we consume key bits from the end first.
+foldProof :: Hashing a -> Key -> a -> Proof a -> a
+foldProof hashing key value Proof{proofSteps, proofRootJump} =
     rootHash hashing (Indirect proofRootJump rootValue)
   where
-    rootValue = foldl' step value proofSteps
-    step acc ProofStep{stepDirection, stepSibling, stepJump} =
-        addWithDirection
-            hashing
-            stepDirection
-            (Indirect stepJump acc)
-            stepSibling
+    keyAfterRoot = drop (length proofRootJump) key
+    -- Reverse key so we can consume from the leaf end first
+    rootValue = go value (reverse keyAfterRoot) proofSteps
+
+    go acc _ [] = acc
+    go acc revKey (ProofStep{stepConsumed, stepSibling} : rest) =
+        let (consumedRev, remainingRev) = splitAt stepConsumed revKey
+            consumed = reverse consumedRev
+        in  case consumed of
+                (direction : stepJump) ->
+                    go
+                        ( addWithDirection
+                            hashing
+                            direction
+                            (Indirect stepJump acc)
+                            stepSibling
+                        )
+                        remainingRev
+                        rest
+                [] ->
+                    -- Invalid proof: stepConsumed is 0 which shouldn't happen
+                    error "foldProof: invalid proof step with zero consumed bits"
 
 -- |
 -- Verify an inclusion proof against the current tree root.
@@ -135,13 +150,15 @@ verifyInclusionProof
     => FromKV k v a
     -> Selector d Key (Indirect a)
     -> Hashing a
+    -> k
     -> v
     -> Proof a
     -> Transaction m cf d ops Bool
-verifyInclusionProof FromKV{fromV} sel hashing v proof = do
-    let value = fromV v
+verifyInclusionProof FromKV{fromK, fromV} sel hashing k v proof = do
+    let key = fromK k
+        value = fromV v
     mv <- query sel []
     pure $ case mv of
         Just rootValue ->
-            rootHash hashing rootValue == foldProof hashing value proof
+            rootHash hashing rootValue == foldProof hashing key value proof
         Nothing -> False

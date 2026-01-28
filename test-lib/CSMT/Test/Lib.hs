@@ -248,7 +248,7 @@ verifyM codecs fromKV hashing k v = do
         Nothing -> pure False
         Just p ->
             runTransactionUnguarded (pureDatabase codecs)
-                $ verifyInclusionProof fromKV StandaloneCSMTCol hashing v p
+                $ verifyInclusionProof fromKV StandaloneCSMTCol hashing k v p
 
 verifyMWord64 :: Key -> Word64 -> Pure Bool
 verifyMWord64 = verifyM word64Codecs identityFromKV word64Hashing
