@@ -4,7 +4,7 @@ module CSMT.Backend.RocksDBSpec
 where
 
 import CSMT
-    ( Proof
+    ( InclusionProof
     , Standalone (StandaloneCSMTCol, StandaloneKVCol)
     , StandaloneCodecs
     , buildInclusionProof
@@ -97,16 +97,15 @@ dM =
         StandaloneKVCol
         StandaloneCSMTCol
 
-pfM :: ByteString -> T (Maybe (Proof Hash))
-pfM = buildInclusionProof fromKVHashes StandaloneCSMTCol
+pfM :: ByteString -> ByteString -> T (Maybe (InclusionProof Hash))
+pfM = buildInclusionProof fromKVHashes StandaloneCSMTCol hashHashing
 
 vpfM :: ByteString -> ByteString -> T Bool
 vpfM k v = do
-    mp <- pfM k
-    case mp of
-        Nothing -> pure False
-        Just p ->
-            verifyInclusionProof fromKVHashes StandaloneCSMTCol hashHashing k v p
+    mp <- pfM k v
+    pure $ case mp of
+        Nothing -> False
+        Just p -> verifyInclusionProof hashHashing p
 
 testRandomFactsInASparseTree
     :: RunT

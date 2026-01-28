@@ -49,9 +49,9 @@ where
 import CSMT
     ( Direction (L, R)
     , Hashing
+    , InclusionProof
     , Indirect (..)
     , Key
-    , Proof
     , Standalone (..)
     , StandaloneCodecs (..)
     , buildInclusionProof
@@ -228,11 +228,13 @@ deleteMWord64 = deleteM word64Codecs identityFromKV word64Hashing
 proofM
     :: StandaloneCodecs k v a
     -> FromKV k v a
+    -> Hashing a
     -> k
-    -> Pure (Maybe (Proof a))
-proofM codecs fromKV k =
+    -> v
+    -> Pure (Maybe (InclusionProof a))
+proofM codecs fromKV hashing k v =
     runTransactionUnguarded (pureDatabase codecs)
-        $ buildInclusionProof fromKV StandaloneCSMTCol k
+        $ buildInclusionProof fromKV StandaloneCSMTCol hashing k v
 
 verifyM
     :: Eq a
@@ -243,12 +245,10 @@ verifyM
     -> v
     -> Pure Bool
 verifyM codecs fromKV hashing k v = do
-    mp <- proofM codecs fromKV k
-    case mp of
-        Nothing -> pure False
-        Just p ->
-            runTransactionUnguarded (pureDatabase codecs)
-                $ verifyInclusionProof fromKV StandaloneCSMTCol hashing k v p
+    mp <- proofM codecs fromKV hashing k v
+    pure $ case mp of
+        Nothing -> False
+        Just p -> verifyInclusionProof hashing p
 
 verifyMWord64 :: Key -> Word64 -> Pure Bool
 verifyMWord64 = verifyM word64Codecs identityFromKV word64Hashing

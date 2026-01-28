@@ -7,15 +7,16 @@ import CSMT.Hashes
     , renderProof
     )
 import CSMT.Interface (Direction (..), Indirect (..))
-import CSMT.Proof.Insertion (Proof (..), ProofStep (..))
+import CSMT.Proof.Insertion (InclusionProof (..), ProofStep (..))
 import Data.ByteString qualified as B
 import Test.Hspec (Spec, describe, it, shouldBe)
 import Test.QuickCheck (Gen, Testable (..), elements, forAll, listOf)
 
--- Note: Direction is used in generator to create random stepConsumed values
-
-genProofs :: Gen (Proof Hash)
+genProofs :: Gen (InclusionProof Hash)
 genProofs = do
+    proofKey <- listOf $ elements [L, R]
+    proofValue <- mkHash . B.pack <$> listOf (elements [0 .. 255])
+    proofRootHash <- mkHash . B.pack <$> listOf (elements [0 .. 255])
     proofRootJump <- listOf $ elements [L, R]
     proofSteps <- listOf $ do
         stepConsumed <- (+ 1) . length <$> listOf (elements [L, R])
@@ -26,7 +27,14 @@ genProofs = do
                 { stepConsumed
                 , stepSibling = Indirect{jump = siblingJump, value = siblingValue}
                 }
-    return $ Proof{proofSteps, proofRootJump}
+    return
+        $ InclusionProof
+            { proofKey
+            , proofValue
+            , proofRootHash
+            , proofSteps
+            , proofRootJump
+            }
 
 spec :: Spec
 spec = describe "Hashes" $ do

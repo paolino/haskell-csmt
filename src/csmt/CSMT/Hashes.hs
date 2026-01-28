@@ -44,11 +44,13 @@ import CSMT.Interface
     , Key
     , getIndirect
     , getKey
+    , getSizedByteString
     , putIndirect
     , putKey
+    , putSizedByteString
     )
 import CSMT.Interface qualified as Interface
-import CSMT.Proof.Insertion (Proof (..), ProofStep (..))
+import CSMT.Proof.Insertion (InclusionProof (..), ProofStep (..))
 import CSMT.Proof.Insertion qualified as Proof
 import Control.Lens (Iso', iso)
 import Control.Monad (forM_, replicateM)
@@ -151,8 +153,11 @@ root csmt = do
         Just v -> return (Just $ renderHash v)
 
 -- | Serialize a proof to binary format.
-putProof :: Proof Hash -> PutM ()
+putProof :: InclusionProof Hash -> PutM ()
 putProof pf = do
+    putKey $ proofKey pf
+    putSizedByteString $ proofValue pf
+    putSizedByteString $ proofRootHash pf
     putKey $ proofRootJump pf
     putWord16be (fromIntegral $ length $ proofSteps pf)
     forM_ (proofSteps pf) $ \ProofStep{stepConsumed, stepSibling} -> do
@@ -160,12 +165,15 @@ putProof pf = do
         putIndirect stepSibling
 
 -- | Render a proof to a ByteString.
-renderProof :: Proof Hash -> ByteString
+renderProof :: InclusionProof Hash -> ByteString
 renderProof pf = evalPutM $ putProof pf
 
 -- | Deserialize a proof from binary format.
-getProof :: Get (Proof Hash)
+getProof :: Get (InclusionProof Hash)
 getProof = do
+    proofKey <- getKey
+    proofValue <- getSizedByteString
+    proofRootHash <- getSizedByteString
     proofRootJump <- getKey
     len <- getWord16be
     proofSteps <- replicateM
@@ -174,41 +182,42 @@ getProof = do
             stepConsumed <- fromIntegral <$> getWord16be
             stepSibling <- getIndirect
             return $ ProofStep{stepConsumed, stepSibling}
-    return $ Proof{proofSteps, proofRootJump}
+    return
+        $ InclusionProof
+            { proofKey
+            , proofValue
+            , proofRootHash
+            , proofSteps
+            , proofRootJump
+            }
 
 -- | Parse a ByteString as a proof. Returns Nothing on parse failure.
-parseProof :: ByteString -> Maybe (Proof Hash)
+parseProof :: ByteString -> Maybe (InclusionProof Hash)
 parseProof bs =
     case runGet getProof bs of
         Left _ -> Nothing
         Right pf -> Just pf
 
--- | Generate an inclusion proof for a key. Returns the serialized proof.
+-- | Generate an inclusion proof for a key-value pair.
+-- Returns the serialized proof.
 generateInclusionProof
     :: (Monad m, GCompare d)
     => FromKV k v Hash
     -> Selector d Key (Indirect Hash)
     -> k
+    -> v
     -> Transaction m cf d ops (Maybe ByteString)
-generateInclusionProof csmt sel k = do
-    mp <- Proof.buildInclusionProof csmt sel k
+generateInclusionProof csmt sel k v = do
+    mp <- Proof.buildInclusionProof csmt sel hashHashing k v
     pure $ fmap renderProof mp
 
--- | Verify an inclusion proof for a key-value pair.
--- Returns True if the proof is valid.
-verifyInclusionProof
-    :: (Monad m, GCompare d)
-    => FromKV k v Hash
-    -> Selector d Key (Indirect Hash)
-    -> k
-    -> v
-    -> ByteString
-    -> Transaction m cf d ops Bool
-verifyInclusionProof csmt sel key value proofBs = do
+-- | Verify an inclusion proof from a serialized ByteString.
+-- Returns True if the proof is internally consistent.
+verifyInclusionProof :: ByteString -> Bool
+verifyInclusionProof proofBs =
     case parseProof proofBs of
-        Nothing -> pure False
-        Just proof -> do
-            Proof.verifyInclusionProof csmt sel hashHashing key value proof
+        Nothing -> False
+        Just proof -> Proof.verifyInclusionProof hashHashing proof
 
 -- | Isomorphism between ByteString and Hash.
 isoHash :: Iso' ByteString Hash
