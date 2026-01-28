@@ -51,6 +51,7 @@ import CSMT.Interface qualified as Interface
 import CSMT.Proof.Insertion qualified as Proof
 import Control.Lens (Iso', iso)
 import Crypto.Hash (Blake2b_256, hash)
+import Data.Bifunctor (second)
 import Data.Bits (Bits (..))
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
@@ -127,18 +128,21 @@ root csmt = do
         Nothing -> return Nothing
         Just v -> return (Just $ renderHash v)
 
--- | Generate an inclusion proof for a key-value pair.
--- Returns the serialized proof.
+-- | Generate an inclusion proof for a key.
+-- Looks up the value from the KV column and returns both the value
+-- and the serialized proof, ensuring consistency with the current tree state.
 generateInclusionProof
-    :: (Monad m, GCompare d)
+    :: (Monad m, Ord k, GCompare d)
     => FromKV k v Hash
+    -> Selector d k v
+    -- ^ KV column to look up the value
     -> Selector d Key (Indirect Hash)
+    -- ^ CSMT column for tree traversal
     -> k
-    -> v
-    -> Transaction m cf d ops (Maybe ByteString)
-generateInclusionProof csmt sel k v = do
-    mp <- Proof.buildInclusionProof csmt sel hashHashing k v
-    pure $ fmap renderProof mp
+    -> Transaction m cf d ops (Maybe (v, ByteString))
+generateInclusionProof csmt kvSel csmtSel k = do
+    mp <- Proof.buildInclusionProof csmt kvSel csmtSel hashHashing k
+    pure $ fmap (second renderProof) mp
 
 -- | Verify an inclusion proof from a serialized ByteString.
 -- Returns True if the proof is internally consistent.

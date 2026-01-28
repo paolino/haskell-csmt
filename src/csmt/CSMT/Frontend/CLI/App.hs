@@ -186,14 +186,16 @@ core isPiped (RunTransaction run) l' = do
             run $ delete fromKVHashes StandaloneKVCol StandaloneCSMTCol k
             pure $ ErrorMsg DeletedKey
         Just (Q k) -> do
-            mv <- run $ query StandaloneKVCol k
-            case mv of
-                Nothing -> pure $ ErrorMsg KeyNotFound
-                Just v -> do
-                    r <- run $ generateInclusionProof fromKVHashes StandaloneCSMTCol k v
-                    pure $ case r of
-                        Just proof -> Binary "proof" proof
-                        Nothing -> ErrorMsg NoProofFound
+            r <-
+                run
+                    $ generateInclusionProof
+                        fromKVHashes
+                        StandaloneKVCol
+                        StandaloneCSMTCol
+                        k
+            pure $ case r of
+                Just (_v, proof) -> Binary "proof" proof
+                Nothing -> ErrorMsg KeyNotFound
         Just (QB mk) -> do
             case mk of
                 Nothing -> pure $ ErrorMsg InvalidKeyFormat

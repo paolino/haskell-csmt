@@ -226,29 +226,34 @@ deleteMWord64 :: Key -> Pure ()
 deleteMWord64 = deleteM word64Codecs identityFromKV word64Hashing
 
 proofM
-    :: StandaloneCodecs k v a
+    :: Ord k
+    => StandaloneCodecs k v a
     -> FromKV k v a
     -> Hashing a
     -> k
-    -> v
-    -> Pure (Maybe (InclusionProof a))
-proofM codecs fromKV hashing k v =
+    -> Pure (Maybe (v, InclusionProof a))
+proofM codecs fromKV hashing k =
     runTransactionUnguarded (pureDatabase codecs)
-        $ buildInclusionProof fromKV StandaloneCSMTCol hashing k v
+        $ buildInclusionProof
+            fromKV
+            StandaloneKVCol
+            StandaloneCSMTCol
+            hashing
+            k
 
 verifyM
-    :: Eq a
+    :: (Eq a, Eq v, Ord k)
     => StandaloneCodecs k v a
     -> FromKV k v a
     -> Hashing a
     -> k
     -> v
     -> Pure Bool
-verifyM codecs fromKV hashing k v = do
-    mp <- proofM codecs fromKV hashing k v
+verifyM codecs fromKV hashing k expectedV = do
+    mp <- proofM codecs fromKV hashing k
     pure $ case mp of
         Nothing -> False
-        Just p -> verifyInclusionProof hashing p
+        Just (v, p) -> v == expectedV && verifyInclusionProof hashing p
 
 verifyMWord64 :: Key -> Word64 -> Pure Bool
 verifyMWord64 = verifyM word64Codecs identityFromKV word64Hashing
