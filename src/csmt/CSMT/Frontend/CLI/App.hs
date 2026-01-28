@@ -83,8 +83,8 @@ data Command
       Q ByteString
     | -- | Query hash at partial key
       QB (Maybe Key)
-    | -- | Verify inclusion proof for key, value and proof
-      V ByteString ByteString ByteString
+    | -- | Verify inclusion proof (self-contained)
+      V ByteString
     | -- | Query key-value pair
       W ByteString
     | -- | Query root hash
@@ -134,7 +134,7 @@ parseCommand line =
         ["p"] -> Just (QB $ Just [])
         ["p", ks] -> Just (QB $ parseLRKey ks)
         ["w", k] -> Just (W k)
-        ["v", key, value, proof] -> Just (V key value proof)
+        ["v", proof] -> Just (V proof)
         ["r"] -> Just R
         ["k", key] -> Just (K key)
         "#" : _comment -> Just C
@@ -186,10 +186,14 @@ core isPiped (RunTransaction run) l' = do
             run $ delete fromKVHashes StandaloneKVCol StandaloneCSMTCol k
             pure $ ErrorMsg DeletedKey
         Just (Q k) -> do
-            r <- run $ generateInclusionProof fromKVHashes StandaloneCSMTCol k
-            pure $ case r of
-                Just proof -> Binary "proof" proof
-                Nothing -> ErrorMsg NoProofFound
+            mv <- run $ query StandaloneKVCol k
+            case mv of
+                Nothing -> pure $ ErrorMsg KeyNotFound
+                Just v -> do
+                    r <- run $ generateInclusionProof fromKVHashes StandaloneCSMTCol k v
+                    pure $ case r of
+                        Just proof -> Binary "proof" proof
+                        Nothing -> ErrorMsg NoProofFound
         Just (QB mk) -> do
             case mk of
                 Nothing -> pure $ ErrorMsg InvalidKeyFormat
@@ -203,13 +207,12 @@ core isPiped (RunTransaction run) l' = do
             pure $ case r of
                 Just rootHash -> Binary "root" rootHash
                 Nothing -> ErrorMsg TreeEmpty
-        Just (V key value proof) -> do
+        Just (V proof) -> do
             case readHash proof of
-                Just decoded -> do
-                    r <-
-                        run
-                            $ verifyInclusionProof fromKVHashes StandaloneCSMTCol key value decoded
-                    pure $ ErrorMsg $ if r then Valid else Invalid
+                Just decoded ->
+                    pure
+                        $ ErrorMsg
+                        $ if verifyInclusionProof decoded then Valid else Invalid
                 Nothing -> pure $ ErrorMsg InvalidProofFormat
         Just (W k) -> do
             mv <- run $ query StandaloneKVCol k
@@ -327,13 +330,13 @@ helpInteractive :: String
 helpInteractive =
     unlines
         [ "Commands:"
-        , "  i <key> <value>         Change key-value pair and print inclusion proof"
-        , "  w <key>                 Query value for key in bytestring"
-        , "  d <key>                 Delete key and print exclusion proof (soon)"
-        , "  q <key>                 Query inclusion proof for key in bytestring"
-        , "  p <key>                 Query node at partial key in directions LRLRLL..."
-        , "  v <key> <value> <proof> Verify inclusion proof for a key-value pair"
-        , "  r                       Print root hash of the tree"
-        , "  k <key>                 Show key directions"
-        , "  # <comment>             Add comment line (no operation)"
+        , "  i <key> <value> Insert key-value pair"
+        , "  q <key>         Generate inclusion proof for key"
+        , "  v <proof>       Verify inclusion proof"
+        , "  w <key>         Query value for key"
+        , "  d <key>         Delete key"
+        , "  p <key>         Query node at partial key (LRLRLL...)"
+        , "  r               Print root hash"
+        , "  k <key>         Show key as directions"
+        , "  # <comment>     Comment line"
         ]

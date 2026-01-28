@@ -14,11 +14,11 @@
 -- the target value to the root, allowing verification without access to
 -- the full tree.
 module CSMT.Proof.Insertion
-    ( Proof (..)
+    ( InclusionProof (..)
     , ProofStep (..)
     , buildInclusionProof
-    , foldProof
     , verifyInclusionProof
+    , computeRootHash
     )
 where
 
@@ -58,12 +58,19 @@ data ProofStep a = ProofStep
     deriving (Show, Eq)
 
 -- |
--- A complete inclusion proof from a leaf to the root.
+-- A self-contained inclusion proof for a key-value pair.
 --
--- Contains all the sibling information needed to recompute the root hash
--- from a leaf value.
-data Proof a = Proof
-    { proofSteps :: [ProofStep a]
+-- Contains all information needed to verify that a key-value pair
+-- exists in a tree with a specific root hash. Can be serialized
+-- and transmitted independently.
+data InclusionProof a = InclusionProof
+    { proofKey :: Key
+    -- ^ The key being proven
+    , proofValue :: a
+    -- ^ The value at the key
+    , proofRootHash :: a
+    -- ^ The root hash this proof validates against
+    , proofSteps :: [ProofStep a]
     -- ^ Steps from leaf to root
     , proofRootJump :: Key
     -- ^ Jump path at the root node
@@ -71,22 +78,35 @@ data Proof a = Proof
     deriving (Show, Eq)
 
 -- |
--- Generate an inclusion proof for a key in the CSMT.
+-- Generate an inclusion proof for a key-value pair in the CSMT.
 --
 -- Traverses from root to the target key, collecting sibling hashes at each
 -- branch. Returns 'Nothing' if the key is not in the tree.
+--
+-- The returned proof is self-contained with the key, value, and root hash.
 buildInclusionProof
     :: (Monad m, GCompare d)
     => FromKV k v a
     -> Selector d Key (Indirect a)
+    -> Hashing a
     -> k
-    -> Transaction m cf d ops (Maybe (Proof a))
-buildInclusionProof FromKV{fromK} sel k = runMaybeT $ do
+    -> v
+    -> Transaction m cf d ops (Maybe (InclusionProof a))
+buildInclusionProof FromKV{fromK, fromV} sel hashing k v = runMaybeT $ do
     let key = fromK k
-    Indirect jump _ <- MaybeT $ query sel []
-    guard $ isPrefixOf jump key
-    rs <- go jump $ drop (length jump) key
-    pure $ Proof{proofSteps = reverse rs, proofRootJump = jump}
+        value = fromV v
+    rootIndirect@(Indirect rootJump _) <- MaybeT $ query sel []
+    guard $ isPrefixOf rootJump key
+    steps <- go rootJump $ drop (length rootJump) key
+    let proofData =
+            InclusionProof
+                { proofKey = key
+                , proofValue = value
+                , proofRootHash = rootHash hashing rootIndirect
+                , proofSteps = reverse steps
+                , proofRootJump = rootJump
+                }
+    pure proofData
   where
     go _ [] = pure []
     go u (x : ks) = do
@@ -104,22 +124,30 @@ buildInclusionProof FromKV{fromK} sel k = runMaybeT $ do
                 (drop (length jump) ks)
 
 -- |
--- Fold a proof to compute the expected root hash.
+-- Verify an inclusion proof is internally consistent.
 --
--- Starting from the leaf value, combines it with each sibling hash
--- using the tree's hashing functions to compute what the root hash
--- should be if the proof is valid.
+-- Recomputes the root hash from the proof data and checks it matches
+-- the claimed root hash. This is a pure function that requires no
+-- database access.
 --
--- The key is required to derive the direction and jump path at each step.
--- Since proof steps are ordered leaf-to-root but the key is root-to-leaf,
--- we consume key bits from the end first.
-foldProof :: Hashing a -> Key -> a -> Proof a -> a
-foldProof hashing key value Proof{proofSteps, proofRootJump} =
+-- To verify against a trusted root, compare 'proofRootHash' with
+-- your trusted value after this returns 'True'.
+verifyInclusionProof :: Eq a => Hashing a -> InclusionProof a -> Bool
+verifyInclusionProof hashing proof =
+    proofRootHash proof == computeRootHash hashing proof
+
+-- |
+-- Compute the root hash from an inclusion proof.
+--
+-- Recomputes the Merkle root by combining the proof value with
+-- sibling hashes along the path.
+computeRootHash :: Hashing a -> InclusionProof a -> a
+computeRootHash hashing InclusionProof{proofKey, proofValue, proofSteps, proofRootJump} =
     rootHash hashing (Indirect proofRootJump rootValue)
   where
-    keyAfterRoot = drop (length proofRootJump) key
+    keyAfterRoot = drop (length proofRootJump) proofKey
     -- Reverse key so we can consume from the leaf end first
-    rootValue = go value (reverse keyAfterRoot) proofSteps
+    rootValue = go proofValue (reverse keyAfterRoot) proofSteps
 
     go acc _ [] = acc
     go acc revKey (ProofStep{stepConsumed, stepSibling} : rest) =
@@ -138,27 +166,4 @@ foldProof hashing key value Proof{proofSteps, proofRootJump} =
                         rest
                 [] ->
                     -- Invalid proof: stepConsumed is 0 which shouldn't happen
-                    error "foldProof: invalid proof step with zero consumed bits"
-
--- |
--- Verify an inclusion proof against the current tree root.
---
--- Computes the expected root hash from the proof and compares it to the
--- actual root hash in the tree. Returns 'True' if they match.
-verifyInclusionProof
-    :: (Eq a, Monad m, GCompare d)
-    => FromKV k v a
-    -> Selector d Key (Indirect a)
-    -> Hashing a
-    -> k
-    -> v
-    -> Proof a
-    -> Transaction m cf d ops Bool
-verifyInclusionProof FromKV{fromK, fromV} sel hashing k v proof = do
-    let key = fromK k
-        value = fromV v
-    mv <- query sel []
-    pure $ case mv of
-        Just rootValue ->
-            rootHash hashing rootValue == foldProof hashing key value proof
-        Nothing -> False
+                    error "computeRootHash: invalid proof step with zero consumed bits"

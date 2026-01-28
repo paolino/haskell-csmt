@@ -76,18 +76,34 @@ Existing serialized proofs will not be compatible.
 ## Implementation Progress
 
 - [x] Investigation complete
-- [x] Update `ProofStep` type
-- [x] Update `buildInclusionProof`
-- [x] Update `foldProof` to take key parameter
-- [x] Update `verifyInclusionProof`
+- [x] Rename `Proof` to `InclusionProof`
+- [x] Add `proofKey`, `proofValue`, `proofRootHash` fields
+- [x] Update `ProofStep` type (stepConsumed + stepSibling only)
+- [x] Update `buildInclusionProof` to populate all fields
+- [x] Make `verifyInclusionProof` pure (no database access needed)
+- [x] Add `computeRootHash` helper function
 - [x] Update serialization in `CSMT/Hashes.hs`
 - [x] Update test generators
-- [x] Update CLI to require key for verification
+- [x] Simplify CLI `v` command to just `v <proof>`
 - [x] Run tests to verify correctness
 
-## Implementation Notes
+## Final Implementation
 
-Key insight: Since proof steps are ordered leaf-to-root but the key is root-to-leaf,
-`foldProof` reverses the key and consumes bits from what was the leaf end first.
+The `InclusionProof` is now fully self-contained:
 
-The CLI `v` command now requires all three parameters: `v <key> <value> <proof>`
+```haskell
+data InclusionProof a = InclusionProof
+    { proofKey :: Key        -- The key being proven
+    , proofValue :: a        -- The value at the key
+    , proofRootHash :: a     -- The root hash this proves against
+    , proofSteps :: [ProofStep a]
+    , proofRootJump :: Key
+    }
+```
+
+Verification is now pure:
+```haskell
+verifyInclusionProof :: Eq a => Hashing a -> InclusionProof a -> Bool
+```
+
+The verifier just needs to trust that `proofRootHash` matches a known/trusted root.
