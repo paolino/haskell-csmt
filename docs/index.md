@@ -7,13 +7,6 @@
 
 A Compact Sparse Merkle Tree is a space-efficient variant of a Merkle tree optimized for sparse key spaces. It enables cryptographic proofs of inclusion (or exclusion) while minimizing storage requirements through path compression.
 
-```asciinema-player
-{ "file": "assets/asciinema/bootstrap.cast"
-, "mkap_theme": "none"
-, "cols": 100
-}
-```
-
 ## Features
 
 This package provides:
