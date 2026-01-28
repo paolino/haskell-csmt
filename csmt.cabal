@@ -60,6 +60,8 @@ library
     CSMT.Deletion
     CSMT.Frontend.CLI.App
     CSMT.Hashes
+    CSMT.Hashes.CBOR
+    CSMT.Hashes.Types
     CSMT.Insertion
     CSMT.Interface
     CSMT.Proof.Completeness
