@@ -78,41 +78,47 @@ data InclusionProof a = InclusionProof
     deriving (Show, Eq)
 
 -- |
--- Generate an inclusion proof for a key-value pair in the CSMT.
+-- Generate an inclusion proof for a key in the CSMT.
 --
--- Traverses from root to the target key, collecting sibling hashes at each
--- branch. Returns 'Nothing' if the key is not in the tree.
+-- Looks up the value from the KV column and traverses from root to the
+-- target key, collecting sibling hashes at each branch. Returns 'Nothing'
+-- if the key is not in the tree.
 --
--- The returned proof is self-contained with the key, value, and root hash.
+-- Returns both the raw value and the proof, ensuring the proof matches
+-- the current state of the tree.
 buildInclusionProof
-    :: (Monad m, GCompare d)
+    :: (Monad m, Ord k, GCompare d)
     => FromKV k v a
+    -> Selector d k v
+    -- ^ KV column to look up the value
     -> Selector d Key (Indirect a)
+    -- ^ CSMT column for tree traversal
     -> Hashing a
     -> k
-    -> v
-    -> Transaction m cf d ops (Maybe (InclusionProof a))
-buildInclusionProof FromKV{fromK, fromV} sel hashing k v = runMaybeT $ do
-    let key = fromK k
-        value = fromV v
-    rootIndirect@(Indirect rootJump _) <- MaybeT $ query sel []
-    guard $ isPrefixOf rootJump key
-    steps <- go rootJump $ drop (length rootJump) key
-    let proofData =
-            InclusionProof
-                { proofKey = key
-                , proofValue = value
-                , proofRootHash = rootHash hashing rootIndirect
-                , proofSteps = reverse steps
-                , proofRootJump = rootJump
-                }
-    pure proofData
+    -> Transaction m cf d ops (Maybe (v, InclusionProof a))
+buildInclusionProof FromKV{fromK, fromV} kvSel csmtSel hashing k =
+    runMaybeT $ do
+        v <- MaybeT $ query kvSel k
+        let key = fromK k
+            value = fromV v
+        rootIndirect@(Indirect rootJump _) <- MaybeT $ query csmtSel []
+        guard $ isPrefixOf rootJump key
+        steps <- go rootJump $ drop (length rootJump) key
+        let proofData =
+                InclusionProof
+                    { proofKey = key
+                    , proofValue = value
+                    , proofRootHash = rootHash hashing rootIndirect
+                    , proofSteps = reverse steps
+                    , proofRootJump = rootJump
+                    }
+        pure (v, proofData)
   where
     go _ [] = pure []
     go u (x : ks) = do
-        Indirect jump _ <- MaybeT $ query sel (u <> [x])
+        Indirect jump _ <- MaybeT $ query csmtSel (u <> [x])
         guard $ isPrefixOf jump ks
-        stepSibling <- MaybeT $ query sel (u <> [oppositeDirection x])
+        stepSibling <- MaybeT $ query csmtSel (u <> [oppositeDirection x])
         let step =
                 ProofStep
                     { stepConsumed = 1 + length jump

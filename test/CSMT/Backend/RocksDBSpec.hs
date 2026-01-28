@@ -97,15 +97,20 @@ dM =
         StandaloneKVCol
         StandaloneCSMTCol
 
-pfM :: ByteString -> ByteString -> T (Maybe (InclusionProof Hash))
-pfM = buildInclusionProof fromKVHashes StandaloneCSMTCol hashHashing
+pfM :: ByteString -> T (Maybe (ByteString, InclusionProof Hash))
+pfM =
+    buildInclusionProof
+        fromKVHashes
+        StandaloneKVCol
+        StandaloneCSMTCol
+        hashHashing
 
 vpfM :: ByteString -> ByteString -> T Bool
-vpfM k v = do
-    mp <- pfM k v
+vpfM k expectedV = do
+    mp <- pfM k
     pure $ case mp of
         Nothing -> False
-        Just p -> verifyInclusionProof hashHashing p
+        Just (v, p) -> v == expectedV && verifyInclusionProof hashHashing p
 
 testRandomFactsInASparseTree
     :: RunT

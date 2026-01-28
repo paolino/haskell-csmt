@@ -50,6 +50,10 @@ test match="":
             --test-option="{{ match }}"
     fi
 
+# Alias for test
+unit match="":
+    just test "{{ match }}"
+
 # Run MPF unit tests
 test-mpf:
     #!/usr/bin/env bash
