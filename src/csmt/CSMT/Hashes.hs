@@ -35,6 +35,8 @@ module CSMT.Hashes
 where
 
 import CSMT.Deletion (deleting)
+import CSMT.Hashes.CBOR (parseProof, renderProof)
+import CSMT.Hashes.Types (Hash (..), renderHash)
 import CSMT.Insertion (inserting)
 import CSMT.Interface
     ( Direction (..)
@@ -46,33 +48,16 @@ import CSMT.Interface
     , putKey
     )
 import CSMT.Interface qualified as Interface
-import CSMT.Proof.Insertion (InclusionProof (..), ProofStep (..))
 import CSMT.Proof.Insertion qualified as Proof
-import Codec.CBOR.Decoding qualified as CBOR
-import Codec.CBOR.Encoding qualified as CBOR
-import Codec.CBOR.Read qualified as CBOR
-import Codec.CBOR.Write qualified as CBOR
 import Control.Lens (Iso', iso)
-import Control.Monad (replicateM)
 import Crypto.Hash (Blake2b_256, hash)
 import Data.Bits (Bits (..))
-import Data.ByteArray (ByteArray, ByteArrayAccess, convert)
-import Data.ByteArray.Encoding (Base (Base64), convertToBase)
+import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
-import Data.ByteString.Char8 qualified as BC
-import Data.ByteString.Lazy qualified as BL
 import Data.Serialize.Extra (evalPutM)
 import Data.Word (Word8)
 import Database.KV.Transaction (GCompare, Selector, Transaction)
-
--- | A 32-byte Blake2b-256 hash value.
-newtype Hash = Hash ByteString
-    deriving
-        (Eq, Ord, Semigroup, Monoid, ByteArrayAccess, ByteArray)
-
-instance Show Hash where
-    show (Hash h) = BC.unpack $ "Hash " <> convertToBase Base64 h
 
 -- | Compute a Blake2b-256 hash of a ByteString.
 mkHash :: ByteString -> Hash
@@ -91,10 +76,6 @@ hashHashing =
 -- | Combine two hashes by concatenating and rehashing.
 addHash :: Hash -> Hash -> Hash
 addHash (Hash h1) (Hash h2) = mkHash (h1 <> h2)
-
--- | Extract the raw ByteString from a Hash.
-renderHash :: Hash -> ByteString
-renderHash (Hash h) = h
 
 -- | Parse a 32-byte ByteString as a Hash. Returns Nothing if length is wrong.
 parseHash :: ByteString -> Maybe Hash
@@ -145,104 +126,6 @@ root csmt = do
     case mi of
         Nothing -> return Nothing
         Just v -> return (Just $ renderHash v)
-
--- | Encode a Direction to CBOR (L = 0, R = 1).
-encodeDirection :: Direction -> CBOR.Encoding
-encodeDirection L = CBOR.encodeWord 0
-encodeDirection R = CBOR.encodeWord 1
-
--- | Decode a Direction from CBOR.
-decodeDirection :: CBOR.Decoder s Direction
-decodeDirection = do
-    w <- CBOR.decodeWord
-    case w of
-        0 -> pure L
-        1 -> pure R
-        _ -> fail "Invalid direction"
-
--- | Encode a Key (list of Directions) to CBOR.
-encodeKey :: Key -> CBOR.Encoding
-encodeKey dirs =
-    CBOR.encodeListLen (fromIntegral $ length dirs)
-        <> foldMap encodeDirection dirs
-
--- | Decode a Key from CBOR.
-decodeKey :: CBOR.Decoder s Key
-decodeKey = do
-    len <- CBOR.decodeListLen
-    replicateM len decodeDirection
-
--- | Encode an Indirect to CBOR.
-encodeIndirect :: Indirect Hash -> CBOR.Encoding
-encodeIndirect Indirect{jump, value} =
-    CBOR.encodeListLen 2
-        <> encodeKey jump
-        <> CBOR.encodeBytes (renderHash value)
-
--- | Decode an Indirect from CBOR.
-decodeIndirect :: CBOR.Decoder s (Indirect Hash)
-decodeIndirect = do
-    _ <- CBOR.decodeListLen
-    jump <- decodeKey
-    value <- Hash <$> CBOR.decodeBytes
-    pure Indirect{jump, value}
-
--- | Encode a ProofStep to CBOR.
-encodeProofStep :: ProofStep Hash -> CBOR.Encoding
-encodeProofStep ProofStep{stepConsumed, stepSibling} =
-    CBOR.encodeListLen 2
-        <> CBOR.encodeInt stepConsumed
-        <> encodeIndirect stepSibling
-
--- | Decode a ProofStep from CBOR.
-decodeProofStep :: CBOR.Decoder s (ProofStep Hash)
-decodeProofStep = do
-    _ <- CBOR.decodeListLen
-    stepConsumed <- CBOR.decodeInt
-    stepSibling <- decodeIndirect
-    pure ProofStep{stepConsumed, stepSibling}
-
--- | Encode an InclusionProof to CBOR.
-encodeProof :: InclusionProof Hash -> CBOR.Encoding
-encodeProof InclusionProof{proofKey, proofValue, proofRootHash, proofSteps, proofRootJump} =
-    CBOR.encodeListLen 5
-        <> encodeKey proofKey
-        <> CBOR.encodeBytes (renderHash proofValue)
-        <> CBOR.encodeBytes (renderHash proofRootHash)
-        <> ( CBOR.encodeListLen (fromIntegral $ length proofSteps)
-                <> foldMap encodeProofStep proofSteps
-           )
-        <> encodeKey proofRootJump
-
--- | Decode an InclusionProof from CBOR.
-decodeProof :: CBOR.Decoder s (InclusionProof Hash)
-decodeProof = do
-    _ <- CBOR.decodeListLen
-    proofKey <- decodeKey
-    proofValue <- Hash <$> CBOR.decodeBytes
-    proofRootHash <- Hash <$> CBOR.decodeBytes
-    stepsLen <- CBOR.decodeListLen
-    proofSteps <- replicateM stepsLen decodeProofStep
-    proofRootJump <- decodeKey
-    pure
-        InclusionProof
-            { proofKey
-            , proofValue
-            , proofRootHash
-            , proofSteps
-            , proofRootJump
-            }
-
--- | Render a proof to a ByteString using CBOR.
-renderProof :: InclusionProof Hash -> ByteString
-renderProof = BL.toStrict . CBOR.toLazyByteString . encodeProof
-
--- | Parse a ByteString as a proof. Returns Nothing on parse failure.
-parseProof :: ByteString -> Maybe (InclusionProof Hash)
-parseProof bs =
-    case CBOR.deserialiseFromBytes decodeProof (BL.fromStrict bs) of
-        Left _ -> Nothing
-        Right (_, pf) -> Just pf
 
 -- | Generate an inclusion proof for a key-value pair.
 -- Returns the serialized proof.
