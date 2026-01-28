@@ -134,12 +134,56 @@ addWithDirection hashing R left right = combineHash right left
 
 ## Serialization
 
-Keys and Indirect values are serialized to ByteStrings for storage:
+Keys and Indirect values are serialized to ByteStrings for storage.
 
-- **Key**: Length (Word16 big-endian) + packed direction bits
-- **Indirect**: Serialized key (jump) + length-prefixed hash bytes
+### Key/Jump Encoding
 
-See [Encodings](./encodings.md) for the detailed binary format.
+Keys (and jumps, which are key infixes) are bitstrings of arbitrary length.
+We use a Word16 big-endian to encode the length in bits, followed by the bits
+packed into bytes (left-aligned).
+
+| Key/Jump    | Encoding            |
+|-------------|---------------------|
+| (empty)     | 0x00 0x00           |
+| L           | 0x00 0x01 0x00      |
+| R           | 0x00 0x01 0x80      |
+| LL          | 0x00 0x02 0x00      |
+| LR          | 0x00 0x02 0x40      |
+| RL          | 0x00 0x02 0x80      |
+| RR          | 0x00 0x02 0xc0      |
+| LLLLLLLL    | 0x00 0x08 0x00      |
+| RRRRRRRR    | 0x00 0x08 0xff      |
+| LLLLLLLLL   | 0x00 0x09 0x00 0x00 |
+| RRRRRRRRR   | 0x00 0x09 0xff 0x80 |
+
+The bit length also determines byte length:
+
+```haskell
+bytesLength len =
+    let (l, r) = len `divMod` 8
+    in if r == 0 then l else l + 1
+```
+
+### ByteString/Hash Encoding
+
+ByteStrings are stored as Word16 big-endian length followed by the bytes.
+Hashes are treated as variable-length bytestrings.
+
+| ByteString | Encoding                           |
+|------------|-----------------------------------|
+| (empty)    | 0x00 0x00                          |
+| "a"        | 0x00 0x01 0x61                     |
+| "abc"      | 0x00 0x03 0x61 0x62 0x63           |
+| "hello"    | 0x00 0x05 0x68 0x65 0x6c 0x6c 0x6f |
+
+### Node (Indirect) Encoding
+
+Nodes are encoded as jump encoding followed by hash encoding:
+
+| Node                              | Encoding                                     |
+|-----------------------------------|----------------------------------------------|
+| `{jump: "", value: "abc"}`        | 0x00 0x00 0x00 0x03 0x61 0x62 0x63           |
+| `{jump: "LRL", value: "data"}`    | 0x00 0x03 0x40 0x00 0x04 0x64 0x61 0x74 0x61 |
 
 ## Backend Interface
 

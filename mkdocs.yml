@@ -45,7 +45,6 @@ nav:
   - Architecture:
     - System: architecture/system.md
     - Storage: architecture/storage.md
-    - Encodings: architecture/encodings.md
     - Inclusion Proof: architecture/inclusion-proof.md
     - Example: architecture/example.md
   - Usage:
