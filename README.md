@@ -32,10 +32,12 @@ main = withRocksDB "mydb" 256 256 $ \runDB -> do
     mroot <- runDB $ runTransaction $ root csmtCol
     print mroot
 
-    -- Generate inclusion proof
-    mproof <- runDB $ runTransaction $
-        generateInclusionProof fromKVHashes csmtCol "key1"
-    print mproof
+    -- Generate inclusion proof (returns value and proof)
+    result <- runDB $ runTransaction $
+        generateInclusionProof fromKVHashes kvCol csmtCol "key1"
+    case result of
+        Just (value, proof) -> print proof
+        Nothing -> putStrLn "Key not found"
 ```
 
 ## Installation
@@ -44,7 +46,7 @@ main = withRocksDB "mydb" 256 256 $ \runDB -> do
 
 ```bash
 nix shell nixpkgs#cachix -c cachix use paolino
-nix shell github:paolino/csmt --refresh
+nix shell github:paolino/haskell-csmt --refresh
 ```
 
 ### Using Cabal
