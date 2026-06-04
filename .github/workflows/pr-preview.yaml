@@ -39,19 +39,36 @@ jobs:
 
       - name: Smoke test demos on localhost
         run: |
-          nix --quiet shell nixpkgs#python3 nixpkgs#curl -c bash -euo pipefail <<'SCRIPT'
-          python3 -m http.server 4173 --bind 127.0.0.1 --directory preview-site &
-          server_pid=$!
-          trap 'kill "$server_pid"' EXIT
+          nix --quiet shell nixpkgs#python3 nixpkgs#curl nixpkgs#psmisc -c bash -euo pipefail <<'SCRIPT'
+          port=4173
+          # These are persistent self-hosted runners: a server leaked by a
+          # previous run can keep squatting on the port, so our own
+          # http.server silently fails to bind and curl then hits the stale
+          # server (its old/empty site 404s). Free the port first.
+          fuser -k "$port/tcp" 2>/dev/null || true
+          sleep 1
 
+          python3 -m http.server "$port" --bind 127.0.0.1 --directory preview-site &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          ready=
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then
+            # If our server died (e.g. the port was still in use), fail loudly
+            # instead of probing whatever else is listening.
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "preview http.server exited before binding port $port"
+              exit 1
+            fi
+            if curl -fsS "http://127.0.0.1:$port/" >/dev/null 2>&1; then
+              ready=1
               break
             fi
             sleep 1
           done
+          [ -n "$ready" ] || { echo "preview server never became ready on port $port"; exit 1; }
 
-          curl -fsS http://127.0.0.1:4173/ >/dev/null
-          curl -fsS http://127.0.0.1:4173/write-csmt/ >/dev/null
-          curl -fsS http://127.0.0.1:4173/write-mpf/ >/dev/null
+          curl -fsS "http://127.0.0.1:$port/" >/dev/null
+          curl -fsS "http://127.0.0.1:$port/write-csmt/" >/dev/null
+          curl -fsS "http://127.0.0.1:$port/write-mpf/" >/dev/null
           SCRIPT
