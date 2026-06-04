@@ -10,6 +10,7 @@ module MPF.Insertion
     , insertingStream
     , mkMPFCompose
     , scanMPFCompose
+    , buildComposeFromList
     , fetchChildTree
     , MPFCompose (..)
     )
