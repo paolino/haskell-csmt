@@ -19,7 +19,7 @@ import CSMT.Insertion
     ( expandToBucketDepth
     , mergeSubtreeRoots
     )
-import CSMT.Interface (FromKV (..), Indirect, Key)
+import CSMT.Interface (Direction (L, R), FromKV (..), Indirect, Key)
 import CSMT.MTS
     ( CommonOps (..)
     , CsmtImpl
@@ -39,6 +39,7 @@ import CSMT.MTS
     , readJournalChunkT
     )
 import CSMT.Populate (patchParallel)
+import CSMT.Proof.Completeness (collectValues)
 import Control.Exception (SomeException, try)
 import Control.Lens (Iso', iso)
 import Control.Monad (foldM, foldM_, forM_)
@@ -61,8 +62,7 @@ import Database.KV.Cursor
     )
 import Database.KV.Database (KeyOf, ValueOf)
 import Database.KV.Transaction
-    ( delete
-    , insert
+    ( insert
     , iterating
     , runTransactionUnguarded
     )
@@ -132,6 +132,15 @@ csmtCodecs =
         , nodeCodec = isoHash
         }
 
+prefixedFromKVHashes :: FromKV ByteString ByteString Hash
+prefixedFromKVHashes =
+    fromKVHashes
+        { treePrefix = \v ->
+            case B.uncons v of
+                Just (w, _) | w < 128 -> [L]
+                _ -> [R]
+        }
+
 -- ------------------------------------------------------------------
 -- CSMT store factory
 -- ------------------------------------------------------------------
@@ -150,6 +159,22 @@ mkCsmtStore = do
         run
         (pureDatabase csmtCodecs)
         fromKVHashes
+        hashHashing
+
+mkPrefixedCsmtStore :: IO (MerkleTreeStore 'Full CsmtImpl IO)
+mkPrefixedCsmtStore = do
+    ref <- newIORef emptyInMemoryDB
+    let run :: forall b. Pure b -> IO b
+        run action = do
+            db <- readIORef ref
+            let (a, db') = runPure db action
+            writeIORef ref db'
+            pure a
+    csmtMerkleTreeStore
+        []
+        run
+        (pureDatabase csmtCodecs)
+        prefixedFromKVHashes
         hashHashing
 
 -- ------------------------------------------------------------------
@@ -475,6 +500,47 @@ mkCsmtKVOnlyOps = do
         , RunTxPure runTx
         )
 
+mkPrefixedCsmtKVOnlyOps
+    :: IO
+        ( Ops
+            'KVOnly
+            Pure
+            StandaloneCF
+            (Standalone ByteString ByteString Hash)
+            StandaloneOp
+            ByteString
+            ByteString
+            Hash
+        , RunTxPure
+        )
+mkPrefixedCsmtKVOnlyOps = do
+    ref <- newIORef emptyInMemoryDB
+    let run :: forall b. Pure b -> IO b
+        run action = do
+            s <- readIORef ref
+            let (a, s') = runPure s action
+            writeIORef ref s'
+            pure a
+        db = pureDatabase csmtCodecs
+        runTx = run . runTransactionUnguarded db
+    pure
+        ( mkKVOnlyOps
+            []
+            2
+            100
+            StandaloneKVCol
+            StandaloneCSMTCol
+            StandaloneJournalCol
+            StandaloneMetricsCol
+            (iso id id)
+            prefixedFromKVHashes
+            hashHashing
+            runTx
+            runTx
+            (const $ pure ())
+        , RunTxPure runTx
+        )
+
 -- ------------------------------------------------------------------
 -- Helpers
 -- ------------------------------------------------------------------
@@ -509,7 +575,7 @@ collectAll = do
             Just e -> go ((entryKey e, entryValue e) : acc)
 
 -- | Parse journal entry tag byte.
--- 0x01 = JInsert, 0x02 = JUpdate, 0x00 = JDelete
+-- 0x01 = JInsert, 0x02/0x03 = JUpdate, 0x00 = JDelete.
 data JTag = JIns | JUpd | JDel
     deriving stock (Eq, Show)
 
@@ -517,6 +583,15 @@ parseTag :: ByteString -> (JTag, ByteString)
 parseTag bs = case B.uncons bs of
     Just (0x01, rest) -> (JIns, rest)
     Just (0x02, rest) -> (JUpd, rest)
+    Just (0x03, rest) ->
+        let (lenBytes, payload) = B.splitAt 4 rest
+            oldLen =
+                B.foldl'
+                    (\acc w -> acc * 256 + fromIntegral w)
+                    0
+                    lenBytes
+            (_, new) = B.splitAt oldLen payload
+        in  (JUpd, new)
     Just (0x00, rest) -> (JDel, rest)
     _ -> error "invalid journal tag"
 
@@ -794,6 +869,80 @@ spec = do
                         actual <-
                             rtx (opsRootHash fullOps)
                         actual `shouldBe` expected
+        it "KVOnly toFull relocates prefix-changing updates" $ do
+            (ops0, RunTxPure rtx) <- mkPrefixedCsmtKVOnlyOps
+            let key = "103d753d77c8c541"
+                oldValue = B.cons 0 "old-wallet-input"
+                newValue = B.cons 255 "new-wallet-input"
+            rtx $ opsInsert (kvCommon ops0) key oldValue
+            Just full1 <- toFull ops0
+            Just kv2 <- toKVOnly full1
+            rtx $ opsInsert (kvCommon kv2) key newValue
+            Just full2 <- toFull kv2
+            refStore <- mkPrefixedCsmtStore
+            mtsInsert (mtsKV refStore) key newValue
+            expected <- mtsRootHash (mtsTree refStore)
+            actual <- rtx $ opsRootHash full2
+            actual `shouldBe` expected
+            oldPrefixValues <-
+                rtx
+                    $ collectValues
+                        StandaloneCSMTCol
+                        []
+                        [L]
+            newPrefixValues <-
+                rtx
+                    $ collectValues
+                        StandaloneCSMTCol
+                        []
+                        [R]
+            length oldPrefixValues `shouldBe` 0
+            length newPrefixValues `shouldBe` 1
+        it "prefixed Full root equals KVOnly toFull root"
+            $ property
+            $ forAll genOps
+            $ \ops -> do
+                (kvOps, RunTxPure rtx) <- mkPrefixedCsmtKVOnlyOps
+                expectedStore <- mkPrefixedCsmtStore
+                expectedKV <-
+                    foldM
+                        (applyOp (kvCommon kvOps) rtx)
+                        Map.empty
+                        ops
+                mapM_
+                    (uncurry $ mtsInsert $ mtsKV expectedStore)
+                    $ Map.toList expectedKV
+                Just fullOps <- toFull kvOps
+                expected <- mtsRootHash (mtsTree expectedStore)
+                actual <- rtx $ opsRootHash fullOps
+                actual `shouldBe` expected
+        it "prefixed KVOnly toFull leaves no orphan tree leaves"
+            $ property
+            $ forAll genOps
+            $ \ops -> do
+                (kvOps, RunTxPure rtx) <- mkPrefixedCsmtKVOnlyOps
+                expectedKV <-
+                    foldM
+                        (applyOp (kvCommon kvOps) rtx)
+                        Map.empty
+                        ops
+                Just _fullOps <- toFull kvOps
+                oldPrefixValues <-
+                    rtx
+                        $ collectValues
+                            StandaloneCSMTCol
+                            []
+                            [L]
+                newPrefixValues <-
+                    rtx
+                        $ collectValues
+                            StandaloneCSMTCol
+                            []
+                            [R]
+                let treeLeafCount =
+                        length oldPrefixValues
+                            + length newPrefixValues
+                treeLeafCount `shouldBe` Map.size expectedKV
         it "journal is empty after toFull" $ do
             (ops, RunTxPure rtx) <- mkCsmtKVOnlyOps
             rtx (opsInsert (kvCommon ops) "k" "v")
@@ -1331,6 +1480,66 @@ spec = do
                 assertAfterReplay full5 kv3
 
     describe "CSMT crash recovery" $ do
+        it "recovered prefixed journal update matches deterministic root" $ do
+            ref <- newIORef emptyInMemoryDB
+            let run :: forall b. Pure b -> IO b
+                run action = do
+                    s <- readIORef ref
+                    let (a, s') = runPure s action
+                    writeIORef ref s'
+                    pure a
+                db = pureDatabase csmtCodecs
+                rtx = run . runTransactionUnguarded db
+                key = "103d753d77c8c541"
+                oldValue = B.cons 0 "old-wallet-input"
+                newValue = B.cons 255 "new-wallet-input"
+                mkOps =
+                    mkKVOnlyOps
+                        []
+                        2
+                        100
+                        StandaloneKVCol
+                        StandaloneCSMTCol
+                        StandaloneJournalCol
+                        StandaloneMetricsCol
+                        (iso id id)
+                        prefixedFromKVHashes
+                        hashHashing
+                        rtx
+                        rtx
+                        (const $ pure ())
+            rtx $ opsInsert (kvCommon mkOps) key oldValue
+            Just full1 <- toFull mkOps
+            Just kv2 <- toKVOnly full1
+            rtx $ opsInsert (kvCommon kv2) key newValue
+            state <-
+                openOps
+                    []
+                    2
+                    100
+                    StandaloneKVCol
+                    StandaloneCSMTCol
+                    StandaloneJournalCol
+                    StandaloneMetricsCol
+                    (iso id id)
+                    prefixedFromKVHashes
+                    hashHashing
+                    rtx
+                    rtx
+                    (const $ pure ())
+            recoveredKV <- case state of
+                Ready (ChooseKVOnly kvOps) ->
+                    pure kvOps
+                Ready (ChooseFull _) ->
+                    fail "expected ChooseKVOnly"
+                NeedsRecovery _ ->
+                    fail "unexpected sentinel recovery"
+            Just recoveredFull <- toFull recoveredKV
+            refStore <- mkPrefixedCsmtStore
+            mtsInsert (mtsKV refStore) key newValue
+            expected <- mtsRootHash $ mtsTree refStore
+            actual <- rtx $ opsRootHash recoveredFull
+            actual `shouldBe` expected
         it "recovery after simulated crash matches clean replay"
             $ property
             $ forAll genBSPairs

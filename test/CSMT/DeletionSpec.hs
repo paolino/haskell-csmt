@@ -6,6 +6,7 @@ where
 
 import CSMT
     ( Direction (L, R)
+    , Indirect (value)
     , Standalone (StandaloneCSMTCol)
     )
 import CSMT.Backend.Pure
@@ -19,7 +20,14 @@ import CSMT.Deletion
     , deletionPathToOps
     , newDeletionPath
     )
-import CSMT.Interface (Key)
+import CSMT.Insertion
+    ( insertingTreeOnly
+    , updatingTreeOnly
+    )
+import CSMT.Interface (FromKV (..), Key)
+import CSMT.Proof.Completeness
+    ( collectValues
+    )
 import CSMT.Test.Lib
     ( deleteWord64
     , genPaths
@@ -31,6 +39,7 @@ import CSMT.Test.Lib
     , word64Codecs
     , word64Hashing
     )
+import Control.Lens (simple)
 import Data.Word (Word64)
 import Test.Hspec (Spec, describe, it, shouldBe)
 import Test.QuickCheck
@@ -40,6 +49,14 @@ import Test.QuickCheck
     , getSize
     , shuffle
     )
+
+prefixedFromKV :: FromKV Key Word64 Word64
+prefixedFromKV =
+    FromKV
+        { isoK = simple
+        , fromV = id
+        , treePrefix = \v -> if even v then [L] else [R]
+        }
 
 spec :: Spec
 spec = do
@@ -173,6 +190,38 @@ spec = do
                 rs1 = deleteWord64 rs0 [L]
               in
                 rs1 `shouldBe` emptyInMemoryDB
+        it "tree-only update removes the old value-derived prefix" $ do
+            let ((), db) =
+                    runPure emptyInMemoryDB
+                        $ runPureTransaction word64Codecs
+                        $ do
+                            insertingTreeOnly
+                                []
+                                prefixedFromKV
+                                word64Hashing
+                                StandaloneCSMTCol
+                                [R]
+                                (2 :: Word64)
+                            updatingTreeOnly
+                                []
+                                prefixedFromKV
+                                word64Hashing
+                                StandaloneCSMTCol
+                                [R]
+                                (2 :: Word64)
+                                (3 :: Word64)
+                collectedL =
+                    fst
+                        $ runPure db
+                        $ runPureTransaction word64Codecs
+                        $ collectValues StandaloneCSMTCol [] [L]
+                collectedR =
+                    fst
+                        $ runPure db
+                        $ runPureTransaction word64Codecs
+                        $ collectValues StandaloneCSMTCol [] [R]
+            collectedL `shouldBe` []
+            map value collectedR `shouldBe` [3]
         it "deletes one of two sibling keys"
             $ let
                 rs0 = insertWord64 emptyInMemoryDB [L] (1 :: Word64)

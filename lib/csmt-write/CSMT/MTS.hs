@@ -85,13 +85,22 @@ import CSMT.Backend.Standalone
     , StandaloneCF
     , StandaloneOp
     )
-import CSMT.Deletion (deleteSubtree, deleting, deletingTreeOnly)
+import CSMT.Deletion
+    ( deleteSubtree
+    , deleting
+    , deletingDirect
+    , deletingTreeOnly
+    )
 import CSMT.Hashes (Hash)
 import CSMT.Insertion
-    ( expandToBucketDepth
+    ( allPrefixes
+    , bucketIndex
+    , expandToBucketDepth
     , inserting
+    , insertingDirect
     , insertingTreeOnly
     , mergeSubtreeRoots
+    , updatingTreeOnly
     )
 import CSMT.Interface
     ( FromKV (..)
@@ -121,6 +130,8 @@ import Control.Monad (unless, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.List (foldl')
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Serialize (getWord8, putWord8)
 import Data.Serialize.Extra (evalGetM, evalPutM)
@@ -247,20 +258,13 @@ encodeJournalUpdate old new =
 encodeJournalDelete :: ByteString -> ByteString
 encodeJournalDelete v = journalDeleteTag <> v
 
--- | Tag for journal entry.
---
--- * 'JInsert' — new key, not in CSMT (safe to elide on delete)
--- * 'JUpdate' — overwrite of key already in CSMT
--- * 'JDelete' — key removed, CSMT needs to delete it
-data JournalTag = JInsert | JUpdate | JDelete
-    deriving stock (Eq)
-
 data JournalEntry
     = JournalInsert ByteString
     | JournalUpdateLegacy ByteString
     | JournalUpdate ByteString ByteString
     | JournalDelete ByteString
 
+-- | Encode a big-endian 32-bit byte length.
 encodeLength :: Int -> ByteString
 encodeLength n =
     B.pack
@@ -274,8 +278,13 @@ decodeLength :: ByteString -> Int
 decodeLength =
     B.foldl' (\acc w -> acc * 256 + fromIntegral w) 0
 
-parseJournalReplayEntry :: ByteString -> JournalEntry
-parseJournalReplayEntry bs = case B.uncons bs of
+-- | Parse a journal entry without discarding update payloads.
+--
+-- Tag @0x03@ stores both the old and new value. Replay needs
+-- the old value to remove a value-derived tree prefix before
+-- inserting the replacement.
+parseJournalEntry :: ByteString -> JournalEntry
+parseJournalEntry bs = case B.uncons bs of
     Just (0x01, rest) -> JournalInsert rest
     Just (0x02, rest) -> JournalUpdateLegacy rest
     Just (0x03, rest) ->
@@ -287,15 +296,6 @@ parseJournalReplayEntry bs = case B.uncons bs of
                 else JournalUpdate old new
     Just (0x00, rest) -> JournalDelete rest
     _ -> error "parseJournalEntry: invalid tag byte"
-
--- | Parse a journal entry into tag + value payload.
-parseJournalEntry :: ByteString -> (JournalTag, ByteString)
-parseJournalEntry bs =
-    case parseJournalReplayEntry bs of
-        JournalInsert v -> (JInsert, v)
-        JournalUpdateLegacy v -> (JUpdate, v)
-        JournalUpdate _ new -> (JUpdate, new)
-        JournalDelete v -> (JDelete, v)
 
 -- ------------------------------------------------------------------
 -- Crash recovery sentinel
@@ -705,7 +705,7 @@ csmtKVOnlyStoreT _fromKV =
                 mj <- query StandaloneJournalCol k
                 existing <- query StandaloneKVCol k
                 let journalValue =
-                        case parseJournalReplayEntry <$> mj of
+                        case parseJournalEntry <$> mj of
                             Just (JournalInsert _) ->
                                 encodeJournalInsert v
                             Just (JournalUpdate old _) ->
@@ -743,7 +743,7 @@ csmtKVOnlyStoreT _fromKV =
                             kvCountKey
                             (-1)
                         mj <- query StandaloneJournalCol k
-                        case parseJournalReplayEntry <$> mj of
+                        case parseJournalEntry <$> mj of
                             Just (JournalInsert _) -> do
                                 delete StandaloneJournalCol k
                                 adjustCounter
@@ -1046,7 +1046,7 @@ replayEntries prefix fromKV hashing entries = do
   where
     applyEntry e =
         let k = entryKey e
-        in  case parseJournalReplayEntry (entryValue e) of
+        in  case parseJournalEntry (entryValue e) of
                 JournalInsert v ->
                     insertingTreeOnly
                         prefix
@@ -1055,28 +1055,18 @@ replayEntries prefix fromKV hashing entries = do
                         StandaloneCSMTCol
                         k
                         v
-                JournalUpdateLegacy v ->
-                    insertingTreeOnly
-                        prefix
-                        fromKV
-                        hashing
-                        StandaloneCSMTCol
-                        k
-                        v
+                JournalUpdateLegacy _ ->
+                    error
+                        "replayEntries: legacy journal update \
+                        \cannot relocate value-derived tree prefix"
                 JournalUpdate old new -> do
-                    deletingTreeOnly
+                    updatingTreeOnly
                         prefix
                         fromKV
                         hashing
                         StandaloneCSMTCol
                         k
                         old
-                    insertingTreeOnly
-                        prefix
-                        fromKV
-                        hashing
-                        StandaloneCSMTCol
-                        k
                         new
                 JournalDelete v ->
                     deletingTreeOnly
@@ -1215,7 +1205,7 @@ mkKVOnlyOps
                         existing <- query kvCol k
                         let encoded = view journalIso v
                             journalValue =
-                                case parseJournalReplayEntry <$> mj of
+                                case parseJournalEntry <$> mj of
                                     Just (JournalInsert _) ->
                                         encodeJournalInsert encoded
                                     Just (JournalUpdate old _) ->
@@ -1248,7 +1238,7 @@ mkKVOnlyOps
                             Just v -> do
                                 delete kvCol k
                                 mj <- query journalCol k
-                                case parseJournalReplayEntry <$> mj of
+                                case parseJournalEntry <$> mj of
                                     Just (JournalInsert _) -> do
                                         delete journalCol k
                                         adjustCounter
@@ -1346,7 +1336,7 @@ mkKVOnlyOps
                 else do
                     let n = length entries
                         remaining' = remaining - n
-                        (updateTxns, ops) =
+                        (normalOps, updateOps, updateFinalizers) =
                             journalEntriesToReplayWork
                                 journalIso
                                 fromKV
@@ -1355,14 +1345,24 @@ mkKVOnlyOps
                                 journalCol
                                 prefix
                                 entries
-                        bucketTxns =
+                        normalBucketTxns =
                             patchParallel
                                 bucketBits
                                 prefix
                                 hashing
                                 csmtCol
                                 journalCol
-                                ops
+                                normalOps
+                        updateBucketTxns =
+                            patchParallelTreeOnly
+                                bucketBits
+                                prefix
+                                hashing
+                                csmtCol
+                                updateOps
+                        bucketTxns =
+                            normalBucketTxns
+                                <> updateBucketTxns
                     trace
                         ReplayStart
                             { rsChunkSize = n
@@ -1373,10 +1373,10 @@ mkKVOnlyOps
                             , rsEntriesRemaining =
                                 remaining'
                             }
-                    mapM_ runTxReplay updateTxns
                     mapConcurrently_
                         (runTxReplay . snd)
                         bucketTxns
+                    mapM_ runTxReplay updateFinalizers
                     trace ReplayStop
                     replayLoop remaining'
 
@@ -1496,13 +1496,14 @@ readJournalChunkT journalCol chunkSize = do
 
 -- | Convert journal entries into replay work.
 --
--- Inserts and deletes can be replayed through bucketed
--- 'patchParallel'. Updates need one atomic transaction because the
--- old and new value-derived tree keys may belong to different
--- buckets; deleting the journal entry before both tree operations
--- complete would lose the update during crash recovery.
+-- Inserts and deletes are replayed through bucketed
+-- 'patchParallel', which also deletes their journal entries.
+-- Updates become two tree-only bucket operations: delete the old
+-- value-derived tree key and insert the new one. Their journal entry
+-- is deleted only after both bucket operations have completed, so a
+-- crash can safely replay the idempotent update again.
 journalEntriesToReplayWork
-    :: (Monad m, GCompare d, Ord k)
+    :: (GCompare d, Ord k)
     => Iso' v ByteString
     -- ^ Journal value serialization
     -> FromKV k v a
@@ -1515,54 +1516,62 @@ journalEntriesToReplayWork
     -- ^ Prefix
     -> [(k, ByteString)]
     -- ^ (journal key, encoded journal value)
-    -> ( [Transaction m cf d op ()]
-       , [(k, PatchOp Key a)]
+    -> ( [(k, PatchOp Key a)]
+       , [PatchOp Key a]
+       , [Transaction m cf d op ()]
        )
 journalEntriesToReplayWork
     journalIso
     fromKV
-    hashing
-    csmtCol
+    _hashing
+    _csmtCol
     journalCol
-    prefix =
-        foldr convert ([], [])
+    _prefix =
+        foldr convert ([], [], [])
       where
-        treeKey v =
-            treePrefix fromKV v
+        treeKey =
+            treePrefix fromKV
 
-        convert (k, raw) (txns, ops) =
-            case parseJournalReplayEntry raw of
+        convert (k, raw) (normalOps, updateOps, finalizers) =
+            case parseJournalEntry raw of
                 JournalInsert serializedV ->
-                    ( txns
-                    , patchInsert k serializedV : ops
+                    ( patchInsert k serializedV : normalOps
+                    , updateOps
+                    , finalizers
                     )
-                JournalUpdateLegacy serializedV ->
-                    ( txns
-                    , patchInsert k serializedV : ops
-                    )
+                JournalUpdateLegacy _ ->
+                    error
+                        "journalEntriesToReplayWork: legacy journal \
+                        \update cannot relocate value-derived tree \
+                        \prefix"
                 JournalUpdate serializedOld serializedNew ->
                     let old = review journalIso serializedOld
                         new = review journalIso serializedNew
-                        txn = do
-                            deletingTreeOnly
-                                prefix
-                                fromKV
-                                hashing
-                                csmtCol
-                                k
-                                old
-                            insertingTreeOnly
-                                prefix
-                                fromKV
-                                hashing
-                                csmtCol
-                                k
-                                new
-                            delete journalCol k
-                    in  (txn : txns, ops)
+                        oldTreeKey =
+                            treeKey old <> view (isoK fromKV) k
+                        newTreeKey =
+                            treeKey new <> view (isoK fromKV) k
+                        updateOps' =
+                            if oldTreeKey == newTreeKey
+                                then
+                                    PatchInsert
+                                        newTreeKey
+                                        (fromV fromKV new)
+                                        : updateOps
+                                else
+                                    PatchDelete oldTreeKey
+                                        : PatchInsert
+                                            newTreeKey
+                                            (fromV fromKV new)
+                                        : updateOps
+                    in  ( normalOps
+                        , updateOps'
+                        , delete journalCol k : finalizers
+                        )
                 JournalDelete serializedV ->
-                    ( txns
-                    , patchDelete k serializedV : ops
+                    ( patchDelete k serializedV : normalOps
+                    , updateOps
+                    , finalizers
                     )
 
         patchInsert k serializedV =
@@ -1580,6 +1589,46 @@ journalEntriesToReplayWork
                     (treeKey v <> view (isoK fromKV) k)
                 )
 
+patchParallelTreeOnly
+    :: (GCompare d, Monad m)
+    => Int
+    -> Key
+    -> Hashing a
+    -> Selector d Key (Indirect a)
+    -> [PatchOp Key a]
+    -> [(Int, Transaction m cf d ops ())]
+patchParallelTreeOnly bucketBits pfx hashing csmtCol entries =
+    map mkBucketTx (Map.toList buckets)
+  where
+    prefixes = allPrefixes bucketBits
+
+    buckets =
+        foldl' addEntry Map.empty entries
+
+    addEntry m op =
+        let treeKey = opKey op
+            (bucket, stripped) = splitAt bucketBits treeKey
+            idx = bucketIndex bucket
+            op' = setOpKey stripped op
+        in  Map.insertWith (++) idx [op'] m
+
+    mkBucketTx (idx, ops) =
+        let bpfx = pfx <> (prefixes !! idx)
+        in  ( length ops
+            , mapM_ (applyOp bpfx) ops
+            )
+
+    applyOp bpfx (PatchInsert k v) =
+        insertingDirect bpfx hashing csmtCol k v
+    applyOp bpfx (PatchDelete k) =
+        deletingDirect bpfx hashing csmtCol k
+
+    opKey (PatchInsert k _) = k
+    opKey (PatchDelete k) = k
+
+    setOpKey k (PatchInsert _ v) = PatchInsert k v
+    setOpKey k (PatchDelete _) = PatchDelete k
+
 -- | Convert journal entries to 'PatchOp' pairs for
 -- 'patchParallel'.
 journalEntriesToPatchOps
@@ -1592,15 +1641,29 @@ journalEntriesToPatchOps
 journalEntriesToPatchOps journalIso fromKV = map convert
   where
     convert (k, raw) =
-        let (tag, serializedV) = parseJournalEntry raw
-            v = review journalIso serializedV
+        case parseJournalEntry raw of
+            JournalInsert serializedV ->
+                patchInsert k serializedV
+            JournalUpdateLegacy _ ->
+                error
+                    "journalEntriesToPatchOps: legacy journal update \
+                    \cannot relocate value-derived tree prefix"
+            JournalUpdate _ _ ->
+                error
+                    "journalEntriesToPatchOps: journal update needs \
+                    \update-aware replay"
+            JournalDelete serializedV ->
+                patchDelete k serializedV
+
+    patchInsert k serializedV =
+        let v = review journalIso serializedV
             treeKey =
                 treePrefix fromKV v <> view (isoK fromKV) k
             hash = fromV fromKV v
-        in  case tag of
-                JInsert ->
-                    (k, PatchInsert treeKey hash)
-                JUpdate ->
-                    (k, PatchInsert treeKey hash)
-                JDelete ->
-                    (k, PatchDelete treeKey)
+        in  (k, PatchInsert treeKey hash)
+
+    patchDelete k serializedV =
+        let v = review journalIso serializedV
+            treeKey =
+                treePrefix fromKV v <> view (isoK fromKV) k
+        in  (k, PatchDelete treeKey)
