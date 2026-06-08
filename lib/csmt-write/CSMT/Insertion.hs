@@ -58,6 +58,7 @@ import Data.List (foldl')
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 
+import CSMT.Deletion (deletingTreeOnly)
 import CSMT.Interface
     ( Direction (..)
     , FromKV (..)
@@ -68,6 +69,7 @@ import CSMT.Interface
     , oppositeDirection
     )
 import Control.Lens (view)
+import Control.Monad (forM_)
 import Database.KV.Transaction
     ( GCompare
     , Selector
@@ -117,7 +119,10 @@ inserting
     -> k
     -> v
     -> Transaction m cf d ops ()
-inserting pfx FromKV{isoK, fromV, treePrefix} hashing kVCol csmtCol k v = do
+inserting pfx fromKV@FromKV{isoK, fromV, treePrefix} hashing kVCol csmtCol k v = do
+    mOld <- query kVCol k
+    forM_ mOld $ \old ->
+        deletingTreeOnly pfx fromKV hashing csmtCol k old
     insert kVCol k v
     let treeKey = treePrefix v <> view isoK k
     c <- buildComposeTree csmtCol pfx treeKey (fromV v)
