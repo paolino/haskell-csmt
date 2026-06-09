@@ -77,14 +77,25 @@ spec = do
             -- Single leaf: tree key [L,R] stored at path [] with jump [L,R]
             length csmt `shouldBe` 1
 
-        it "different values produce different tree keys for same key" $ do
+        it "prefix-changing update relocates the same key" $ do
             -- key [R], even value 2 → tree key [L, R]
             -- key [R], odd value 3  → tree key [R, R]
-            -- These are different tree entries despite the same user key
-            let db = insertP [R] 2 $ insertP [R] 3 emptyInMemoryDB
-                csmt = inMemoryCSMTParsed word64Codecs db
-            -- Should have 3 nodes: root + 2 leaves
-            length csmt `shouldBe` 3
+            -- The update must remove the old [L, R] leaf.
+            let db = insertP [R] 3 $ insertP [R] 2 emptyInMemoryDB
+                fresh = insertP [R] 3 emptyInMemoryDB
+                collectedL =
+                    fst
+                        $ runPure db
+                        $ runPureTransaction word64Codecs
+                        $ collectValues StandaloneCSMTCol [] [L]
+                collectedR =
+                    fst
+                        $ runPure db
+                        $ runPureTransaction word64Codecs
+                        $ collectValues StandaloneCSMTCol [] [R]
+            db `shouldBe` fresh
+            collectedL `shouldBe` []
+            map value collectedR `shouldBe` [3]
 
         it "deletion removes the prefixed tree key" $ do
             let db = deleteP [R] $ insertP [R] 2 emptyInMemoryDB
@@ -112,11 +123,11 @@ spec = do
             -- the tree splits at the prefix level [L] vs [R]:
             --   key [L], value 2 (even) → tree key [L, L]
             --   key [R], value 4 (even) → tree key [L, R]
-            --   key [L], value 3 (odd)  → tree key [R, L]
+            --   key [L,L], value 3 (odd)  → tree key [R, L, L]
             let db =
                     insertP [L] 2
                         $ insertP [R] 4
-                        $ insertP [L] 3 emptyInMemoryDB
+                        $ insertP [L, L] 3 emptyInMemoryDB
                 collectedL =
                     fst
                         $ runPure db

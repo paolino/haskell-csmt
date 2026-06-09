@@ -519,6 +519,7 @@ test-suite unit-tests
     CSMT.InsertionSpec
     CSMT.InterfaceSpec
     CSMT.NamespaceSpec
+    CSMT.PrefixReconciliationSpec
     CSMT.Proof.CompletenessSpec
     CSMT.Proof.ExclusionSpec
     CSMT.Proof.InsertionSpec

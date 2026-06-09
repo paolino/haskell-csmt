@@ -22,10 +22,11 @@ import CSMT.Backend.Pure
     )
 import CSMT.Core.CBOR (renderCompletenessProof)
 import CSMT.Hashes (Hash, hashHashing, mkHash, renderHash)
-import CSMT.Interface (Hashing (..), Indirect (..))
+import CSMT.Interface (Hashing (..), Indirect (..), Key)
 import CSMT.Proof.Completeness
-    ( CompletenessProof
+    ( CompletenessProof (..)
     , collectValues
+    , foldCompletenessProof
     , generateProof
     )
 import CSMT.Test.Lib
@@ -40,15 +41,23 @@ import CSMT.Verify qualified as Verify
 import Data.Bits (xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
-import Data.List (sort)
+import Data.List (isPrefixOf, nub, sort)
 import Data.Word (Word8)
 import Database.KV.Transaction (query)
-import Test.Hspec (Spec, describe, it, shouldBe)
+import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck
     ( Gen
+    , Property
     , arbitrary
+    , checkCoverage
+    , chooseInt
+    , conjoin
+    , counterexample
+    , cover
+    , elements
     , forAll
+    , frequency
     , listOf
     , vectorOf
     , (===)
@@ -89,8 +98,135 @@ genTreeProof = do
             -- the values to the proof.
             pure (B.replicate 32 0, [], B.empty)
 
+genDeepPrefixTree :: Gen (Key, [Indirect Hash])
+genDeepPrefixTree = do
+    depth <- chooseInt (2, 6)
+    prefixKey <- vectorOf depth (elements [L, R])
+    let targetLeaves =
+            [ prefixKey ++ [L, L]
+            , prefixKey ++ [L, R]
+            , prefixKey ++ [R, L]
+            ]
+        siblingLeaves =
+            [ take i prefixKey
+                ++ [opposite (prefixKey !! i)]
+                ++ [L, R]
+            | i <- [0 .. depth - 1]
+            ]
+        keys = targetLeaves <> siblingLeaves
+    pure (prefixKey, zipWith indirect keys (intHash <$> [1 ..]))
+  where
+    opposite L = R
+    opposite R = L
+
+genRandomTreeAndPrefix :: Gen (Key, [Indirect Hash])
+genRandomTreeAndPrefix = do
+    keyCount <- chooseInt (16, 64)
+    keys0 <- prefixFree . nub <$> vectorOf (keyCount * 4) genRandomKey
+    let keys = take keyCount keys0
+    if length keys < 8
+        then genRandomTreeAndPrefix
+        else do
+            targetKey <- elements keys
+            prefixLen <-
+                frequency
+                    [ (1, pure 0)
+                    , (3, chooseInt (0, length targetKey))
+                    , (6, chooseInt (min 2 (length targetKey), length targetKey))
+                    ]
+            let prefixKey = take prefixLen targetKey
+            pure (prefixKey, zipWith indirect keys (intHash <$> [1 ..]))
+  where
+    genRandomKey :: Gen Key
+    genRandomKey = do
+        keyLen <- chooseInt (6, 16)
+        vectorOf keyLen (elements [L, R])
+
+    prefixFree :: [Key] -> [Key]
+    prefixFree = foldr insertIfCompatible []
+      where
+        insertIfCompatible key keys
+            | all (compatible key) keys = key : keys
+            | otherwise = keys
+
+        compatible a b =
+            not (a `isPrefixOf` b || b `isPrefixOf` a)
+
 genBS :: Gen ByteString
 genBS = B.pack <$> listOf (arbitrary :: Gen Word8)
+
+verifiesCompletenessRoundTrip
+    :: Key -> [Indirect Hash] -> Property
+verifiesCompletenessRoundTrip prefixKey values =
+    let expectedLeaves =
+            sort
+                [ leaf
+                | leaf@Indirect{jump} <- values
+                , prefixKey `isPrefixOf` jump
+                ]
+        (mp, mr, collected) = evalPureFromEmptyDB $ do
+            insertHashes values
+            proof <-
+                runPureTransaction hashCodecs
+                    $ generateProof
+                        StandaloneCSMTCol
+                        []
+                        prefixKey
+            rootI <-
+                runPureTransaction hashCodecs
+                    $ query StandaloneCSMTCol []
+            collectedLeaves <-
+                runPureTransaction hashCodecs
+                    $ collectValues
+                        StandaloneCSMTCol
+                        []
+                        prefixKey
+            pure
+                ( proof :: Maybe (CompletenessProof Hash)
+                , rootI
+                , collectedLeaves
+                )
+    in  case (mp, mr) of
+            (Just proof@CompletenessWitness{cpInclusionSteps}, Just rootIndirect) ->
+                let trustedRoot = rootHash hashHashing rootIndirect
+                    rootBs = renderHash trustedRoot
+                    proofBs = renderCompletenessProof proof
+                    sortedCollected = sort collected
+                    stepCount = length cpInclusionSteps
+                in  cover
+                        30
+                        (stepCount >= 2)
+                        "deep (>=2 inclusion steps)"
+                        $ counterexample
+                            ( "prefix="
+                                <> show prefixKey
+                                <> ", inclusion steps="
+                                <> show stepCount
+                            )
+                        $ conjoin
+                            [ sortedCollected === expectedLeaves
+                            , foldCompletenessProof
+                                hashHashing
+                                trustedRoot
+                                prefixKey
+                                sortedCollected
+                                proof
+                                === Just trustedRoot
+                            , Verify.verifyCompletenessProof
+                                rootBs
+                                prefixKey
+                                sortedCollected
+                                proofBs
+                                === True
+                            ]
+            (Just CompletenessEmpty{}, _) ->
+                counterexample
+                    "existing prefix unexpectedly produced an empty proof"
+                    False
+            _ ->
+                counterexample
+                    "expected populated proof + root for existing prefix"
+                    False
 
 spec :: Spec
 spec = describe "csmt-verify completeness" $ do
@@ -128,6 +264,68 @@ spec = describe "csmt-verify completeness" $ do
                 []
                 garbage
                 === False
+
+    prop "round-trips populated deep-prefix proofs"
+        $ forAll genDeepPrefixTree
+        $ \(prefixKey, values) -> do
+            let expectedLeaves =
+                    sort
+                        [ leaf
+                        | leaf@Indirect{jump} <- values
+                        , prefixKey `isPrefixOf` jump
+                        ]
+                (mp, mr, collected) = evalPureFromEmptyDB $ do
+                    insertHashes values
+                    proof <-
+                        runPureTransaction hashCodecs
+                            $ generateProof
+                                StandaloneCSMTCol
+                                []
+                                prefixKey
+                    rootI <-
+                        runPureTransaction hashCodecs
+                            $ query StandaloneCSMTCol []
+                    collectedLeaves <-
+                        runPureTransaction hashCodecs
+                            $ collectValues
+                                StandaloneCSMTCol
+                                []
+                                prefixKey
+                    pure
+                        ( proof :: Maybe (CompletenessProof Hash)
+                        , rootI
+                        , collectedLeaves
+                        )
+            sort collected `shouldBe` expectedLeaves
+            case (mp, mr) of
+                ( Just proof@CompletenessWitness{cpInclusionSteps}
+                    , Just rootIndirect
+                    ) -> do
+                        cpInclusionSteps `shouldSatisfy` \steps ->
+                            length steps >= 2
+                        let trustedRoot =
+                                rootHash hashHashing rootIndirect
+                            rootBs = renderHash trustedRoot
+                            proofBs = renderCompletenessProof proof
+                        foldCompletenessProof
+                            hashHashing
+                            trustedRoot
+                            prefixKey
+                            (sort collected)
+                            proof
+                            `shouldBe` Just trustedRoot
+                        Verify.verifyCompletenessProof
+                            rootBs
+                            prefixKey
+                            (sort collected)
+                            proofBs
+                            `shouldBe` True
+                _ -> error "expected populated proof + root"
+
+    prop "round-trips arbitrary tree + arbitrary existing prefix"
+        $ checkCoverage
+        $ forAll genRandomTreeAndPrefix
+        $ uncurry verifiesCompletenessRoundTrip
 
     it "the wire format round-trips a hand-built proof" $ do
         -- Decoder/encoder symmetry on an already-known proof so we

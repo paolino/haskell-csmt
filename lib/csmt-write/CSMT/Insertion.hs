@@ -32,6 +32,7 @@ module CSMT.Insertion
     ( -- * Single insertion
       inserting
     , insertingTreeOnly
+    , updatingTreeOnly
 
       -- * Batch insertion
     , insertingBatch
@@ -58,6 +59,7 @@ import Data.List (foldl')
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 
+import CSMT.Deletion (deletingTreeOnly)
 import CSMT.Interface
     ( Direction (..)
     , FromKV (..)
@@ -68,6 +70,7 @@ import CSMT.Interface
     , oppositeDirection
     )
 import Control.Lens (view)
+import Control.Monad (forM_, when)
 import Database.KV.Transaction
     ( GCompare
     , Selector
@@ -117,7 +120,10 @@ inserting
     -> k
     -> v
     -> Transaction m cf d ops ()
-inserting pfx FromKV{isoK, fromV, treePrefix} hashing kVCol csmtCol k v = do
+inserting pfx fromKV@FromKV{isoK, fromV, treePrefix} hashing kVCol csmtCol k v = do
+    mOld <- query kVCol k
+    forM_ mOld $ \old ->
+        deletingTreeOnly pfx fromKV hashing csmtCol k old
     insert kVCol k v
     let treeKey = treePrefix v <> view isoK k
     c <- buildComposeTree csmtCol pfx treeKey (fromV v)
@@ -139,6 +145,26 @@ insertingTreeOnly pfx FromKV{isoK, fromV, treePrefix} hashing csmtCol k v = do
     let treeKey = treePrefix v <> view isoK k
     c <- buildComposeTree csmtCol pfx treeKey (fromV v)
     mapM_ (uncurry $ insert csmtCol) $ snd $ scanCompose pfx hashing c
+
+-- | Update the tree column only (no KV write).
+-- Used during journal replay when KV is already up to date.
+-- When the value-derived prefix changes, the old leaf must be
+-- removed before the replacement leaf is inserted.
+updatingTreeOnly
+    :: (Monad m, GCompare d)
+    => Key
+    -- ^ Prefix (use @[]@ for root)
+    -> FromKV k v a
+    -> Hashing a
+    -> Selector d Key (Indirect a)
+    -> k
+    -> v
+    -> v
+    -> Transaction m cf d ops ()
+updatingTreeOnly pfx fromKV@FromKV{treePrefix} hashing csmtCol k old new = do
+    when (treePrefix old /= treePrefix new)
+        $ deletingTreeOnly pfx fromKV hashing csmtCol k old
+    insertingTreeOnly pfx fromKV hashing csmtCol k new
 
 -- |
 -- Scan a Compose tree bottom-up, computing hashes and collecting database operations.

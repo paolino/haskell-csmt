@@ -85,13 +85,22 @@ import CSMT.Backend.Standalone
     , StandaloneCF
     , StandaloneOp
     )
-import CSMT.Deletion (deleteSubtree, deleting, deletingTreeOnly)
+import CSMT.Deletion
+    ( deleteSubtree
+    , deleting
+    , deletingDirect
+    , deletingTreeOnly
+    )
 import CSMT.Hashes (Hash)
 import CSMT.Insertion
-    ( expandToBucketDepth
+    ( allPrefixes
+    , bucketIndex
+    , expandToBucketDepth
     , inserting
+    , insertingDirect
     , insertingTreeOnly
     , mergeSubtreeRoots
+    , updatingTreeOnly
     )
 import CSMT.Interface
     ( FromKV (..)
@@ -121,6 +130,8 @@ import Control.Monad (unless, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.List (foldl')
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Serialize (getWord8, putWord8)
 import Data.Serialize.Extra (evalGetM, evalPutM)
@@ -216,37 +227,74 @@ type instance MtsCompletenessProof CsmtImpl = CompletenessProof Hash
 type instance MtsPrefix CsmtImpl = Key
 
 -- | Journal entry tag bytes.
-journalInsertTag, journalUpdateTag, journalDeleteTag :: ByteString
+journalInsertTag
+    , journalUpdateTag
+    , journalUpdateOldNewTag
+    , journalDeleteTag
+        :: ByteString
 journalInsertTag = B.singleton 0x01
 journalUpdateTag = B.singleton 0x02
+journalUpdateOldNewTag = B.singleton 0x03
 journalDeleteTag = B.singleton 0x00
 
 -- | Encode a journal insert entry (new key): @0x01 ++ value@.
 encodeJournalInsert :: ByteString -> ByteString
 encodeJournalInsert v = journalInsertTag <> v
 
--- | Encode a journal update entry (overwrite): @0x02 ++ value@.
-encodeJournalUpdate :: ByteString -> ByteString
-encodeJournalUpdate v = journalUpdateTag <> v
+-- | Encode a legacy journal update entry: @0x02 ++ value@.
+encodeJournalUpdateLegacy :: ByteString -> ByteString
+encodeJournalUpdateLegacy v = journalUpdateTag <> v
+
+-- | Encode a journal update entry with the old CSMT value
+-- and the replacement KV value.
+encodeJournalUpdate :: ByteString -> ByteString -> ByteString
+encodeJournalUpdate old new =
+    journalUpdateOldNewTag
+        <> encodeLength (B.length old)
+        <> old
+        <> new
 
 -- | Encode a journal delete entry: @0x00 ++ oldValue@.
 encodeJournalDelete :: ByteString -> ByteString
 encodeJournalDelete v = journalDeleteTag <> v
 
--- | Tag for journal entry.
---
--- * 'JInsert' — new key, not in CSMT (safe to elide on delete)
--- * 'JUpdate' — overwrite of key already in CSMT
--- * 'JDelete' — key removed, CSMT needs to delete it
-data JournalTag = JInsert | JUpdate | JDelete
-    deriving stock (Eq)
+data JournalEntry
+    = JournalInsert ByteString
+    | JournalUpdateLegacy ByteString
+    | JournalUpdate ByteString ByteString
+    | JournalDelete ByteString
 
--- | Parse a journal entry into tag + value payload.
-parseJournalEntry :: ByteString -> (JournalTag, ByteString)
+-- | Encode a big-endian 32-bit byte length.
+encodeLength :: Int -> ByteString
+encodeLength n =
+    B.pack
+        [ fromIntegral $ n `div` 16777216
+        , fromIntegral $ n `div` 65536
+        , fromIntegral $ n `div` 256
+        , fromIntegral n
+        ]
+
+decodeLength :: ByteString -> Int
+decodeLength =
+    B.foldl' (\acc w -> acc * 256 + fromIntegral w) 0
+
+-- | Parse a journal entry without discarding update payloads.
+--
+-- Tag @0x03@ stores both the old and new value. Replay needs
+-- the old value to remove a value-derived tree prefix before
+-- inserting the replacement.
+parseJournalEntry :: ByteString -> JournalEntry
 parseJournalEntry bs = case B.uncons bs of
-    Just (0x01, rest) -> (JInsert, rest)
-    Just (0x02, rest) -> (JUpdate, rest)
-    Just (0x00, rest) -> (JDelete, rest)
+    Just (0x01, rest) -> JournalInsert rest
+    Just (0x02, rest) -> JournalUpdateLegacy rest
+    Just (0x03, rest) ->
+        let (lenBytes, payload) = B.splitAt 4 rest
+            oldLen = decodeLength lenBytes
+            (old, new) = B.splitAt oldLen payload
+        in  if B.length lenBytes /= 4 || B.length old /= oldLen
+                then error "parseJournalEntry: invalid update payload"
+                else JournalUpdate old new
+    Just (0x00, rest) -> JournalDelete rest
     _ -> error "parseJournalEntry: invalid tag byte"
 
 -- ------------------------------------------------------------------
@@ -656,18 +704,22 @@ csmtKVOnlyStoreT _fromKV =
             { mtsInsert = \k v -> do
                 mj <- query StandaloneJournalCol k
                 existing <- query StandaloneKVCol k
-                let tag = case mj of
-                        Just jv -> case fst $ parseJournalEntry jv of
-                            JInsert -> JInsert
-                            JUpdate -> JUpdate
-                            JDelete -> JUpdate
-                        Nothing -> case existing of
-                            Nothing -> JInsert
-                            Just _ -> JUpdate
+                let journalValue =
+                        case parseJournalEntry <$> mj of
+                            Just (JournalInsert _) ->
+                                encodeJournalInsert v
+                            Just (JournalUpdate old _) ->
+                                encodeJournalUpdate old v
+                            Just (JournalUpdateLegacy _) ->
+                                encodeJournalUpdateLegacy v
+                            Just (JournalDelete old) ->
+                                encodeJournalUpdate old v
+                            Nothing ->
+                                case existing of
+                                    Nothing -> encodeJournalInsert v
+                                    Just old -> encodeJournalUpdate old v
                 insert StandaloneKVCol k v
-                insert StandaloneJournalCol k $ case tag of
-                    JInsert -> encodeJournalInsert v
-                    _ -> encodeJournalUpdate v
+                insert StandaloneJournalCol k journalValue
                 -- Metrics: new KV key → kvCount +1
                 when (isNothing existing)
                     $ adjustCounter
@@ -691,8 +743,8 @@ csmtKVOnlyStoreT _fromKV =
                             kvCountKey
                             (-1)
                         mj <- query StandaloneJournalCol k
-                        case fmap (fst . parseJournalEntry) mj of
-                            Just JInsert -> do
+                        case parseJournalEntry <$> mj of
+                            Just (JournalInsert _) -> do
                                 delete StandaloneJournalCol k
                                 adjustCounter
                                     StandaloneMetricsCol
@@ -707,11 +759,21 @@ csmtKVOnlyStoreT _fromKV =
                                     StandaloneMetricsCol
                                     journalSizeKey
                                     1
-                            _ ->
+                            Just (JournalUpdate old _) ->
+                                insert
+                                    StandaloneJournalCol
+                                    k
+                                    (encodeJournalDelete old)
+                            Just (JournalUpdateLegacy _) ->
                                 insert
                                     StandaloneJournalCol
                                     k
                                     (encodeJournalDelete v)
+                            Just (JournalDelete old) ->
+                                insert
+                                    StandaloneJournalCol
+                                    k
+                                    (encodeJournalDelete old)
             , mtsMetrics =
                 readMetricsT StandaloneMetricsCol
             }
@@ -983,10 +1045,9 @@ replayEntries prefix fromKV hashing entries = do
         entries
   where
     applyEntry e =
-        let (tag, v) = parseJournalEntry (entryValue e)
-            k = entryKey e
-        in  case tag of
-                JInsert ->
+        let k = entryKey e
+        in  case parseJournalEntry (entryValue e) of
+                JournalInsert v ->
                     insertingTreeOnly
                         prefix
                         fromKV
@@ -994,15 +1055,20 @@ replayEntries prefix fromKV hashing entries = do
                         StandaloneCSMTCol
                         k
                         v
-                JUpdate ->
-                    insertingTreeOnly
+                JournalUpdateLegacy _ ->
+                    error
+                        "replayEntries: legacy journal update \
+                        \cannot relocate value-derived tree prefix"
+                JournalUpdate old new -> do
+                    updatingTreeOnly
                         prefix
                         fromKV
                         hashing
                         StandaloneCSMTCol
                         k
-                        v
-                JDelete ->
+                        old
+                        new
+                JournalDelete v ->
                     deletingTreeOnly
                         prefix
                         fromKV
@@ -1121,32 +1187,44 @@ mkKVOnlyOps
                       --
                       -- INSERT (journal × KV → journal'):
                       --   Nothing × Nothing → JInsert  (new key)
-                      --   Nothing × Just _  → JUpdate  (key from CSMT)
+                      --   Nothing × Just old
+                      --     → JUpdate old new (key from CSMT)
                       --   JInsert × _       → JInsert  (still new)
-                      --   JUpdate × _       → JUpdate  (still CSMT)
-                      --   JDelete × _       → JUpdate  (re-insert, CSMT has it)
+                      --   JUpdate old _ × _
+                      --     → JUpdate old new (still CSMT)
+                      --   JDelete old × _
+                      --     → JUpdate old new (re-insert, CSMT has it)
                       --
                       -- DELETE (journal → journal'):
                       --   Nothing           → JDelete  (key from CSMT)
                       --   JInsert           → ∅ elide   (new, not in CSMT)
-                      --   JUpdate           → JDelete  (CSMT key removed)
+                      --   JUpdate old _     → JDelete old
                       --   JDelete           → ⊥         (KV empty, unreachable)
                       opsInsert = \k v -> do
                         mj <- query journalCol k
                         existing <- query kvCol k
                         let encoded = view journalIso v
-                            tag = case mj of
-                                Just jv -> case fst $ parseJournalEntry jv of
-                                    JInsert -> JInsert
-                                    JUpdate -> JUpdate
-                                    JDelete -> JUpdate
-                                Nothing -> case existing of
-                                    Nothing -> JInsert
-                                    Just _ -> JUpdate
+                            journalValue =
+                                case parseJournalEntry <$> mj of
+                                    Just (JournalInsert _) ->
+                                        encodeJournalInsert encoded
+                                    Just (JournalUpdate old _) ->
+                                        encodeJournalUpdate old encoded
+                                    Just (JournalUpdateLegacy _) ->
+                                        encodeJournalUpdateLegacy encoded
+                                    Just (JournalDelete old) ->
+                                        encodeJournalUpdate old encoded
+                                    Nothing ->
+                                        case existing of
+                                            Nothing ->
+                                                encodeJournalInsert
+                                                    encoded
+                                            Just old ->
+                                                encodeJournalUpdate
+                                                    (view journalIso old)
+                                                    encoded
                         insert kvCol k v
-                        insert journalCol k $ case tag of
-                            JInsert -> encodeJournalInsert encoded
-                            _ -> encodeJournalUpdate encoded
+                        insert journalCol k journalValue
                         -- New journal entry → journalSize +1
                         when (isNothing mj)
                             $ adjustCounter
@@ -1160,8 +1238,8 @@ mkKVOnlyOps
                             Just v -> do
                                 delete kvCol k
                                 mj <- query journalCol k
-                                case fmap (fst . parseJournalEntry) mj of
-                                    Just JInsert -> do
+                                case parseJournalEntry <$> mj of
+                                    Just (JournalInsert _) -> do
                                         delete journalCol k
                                         adjustCounter
                                             metricsCol
@@ -1178,13 +1256,23 @@ mkKVOnlyOps
                                             metricsCol
                                             journalSizeKey
                                             1
-                                    _ ->
+                                    Just (JournalUpdate old _) ->
+                                        insert
+                                            journalCol
+                                            k
+                                            (encodeJournalDelete old)
+                                    Just (JournalUpdateLegacy _) ->
                                         insert
                                             journalCol
                                             k
                                             ( encodeJournalDelete
                                                 (view journalIso v)
                                             )
+                                    Just (JournalDelete old) ->
+                                        insert
+                                            journalCol
+                                            k
+                                            (encodeJournalDelete old)
                     , opsQuery = query kvCol
                     }
             , toFull = do
@@ -1248,19 +1336,33 @@ mkKVOnlyOps
                 else do
                     let n = length entries
                         remaining' = remaining - n
-                        ops =
-                            journalEntriesToPatchOps
+                        (normalOps, updateOps, updateFinalizers) =
+                            journalEntriesToReplayWork
                                 journalIso
                                 fromKV
+                                hashing
+                                csmtCol
+                                journalCol
+                                prefix
                                 entries
-                        bucketTxns =
+                        normalBucketTxns =
                             patchParallel
                                 bucketBits
                                 prefix
                                 hashing
                                 csmtCol
                                 journalCol
-                                ops
+                                normalOps
+                        updateBucketTxns =
+                            patchParallelTreeOnly
+                                bucketBits
+                                prefix
+                                hashing
+                                csmtCol
+                                updateOps
+                        bucketTxns =
+                            normalBucketTxns
+                                <> updateBucketTxns
                     trace
                         ReplayStart
                             { rsChunkSize = n
@@ -1274,6 +1376,7 @@ mkKVOnlyOps
                     mapConcurrently_
                         (runTxReplay . snd)
                         bucketTxns
+                    mapM_ runTxReplay updateFinalizers
                     trace ReplayStop
                     replayLoop remaining'
 
@@ -1391,6 +1494,141 @@ readJournalChunkT journalCol chunkSize = do
                     collectN (chunkSize - 1) [e]
     pure [(entryKey e, entryValue e) | e <- entries]
 
+-- | Convert journal entries into replay work.
+--
+-- Inserts and deletes are replayed through bucketed
+-- 'patchParallel', which also deletes their journal entries.
+-- Updates become two tree-only bucket operations: delete the old
+-- value-derived tree key and insert the new one. Their journal entry
+-- is deleted only after both bucket operations have completed, so a
+-- crash can safely replay the idempotent update again.
+journalEntriesToReplayWork
+    :: (GCompare d, Ord k)
+    => Iso' v ByteString
+    -- ^ Journal value serialization
+    -> FromKV k v a
+    -> Hashing a
+    -> Selector d Key (Indirect a)
+    -- ^ CSMT column
+    -> Selector d k ByteString
+    -- ^ Journal column
+    -> Key
+    -- ^ Prefix
+    -> [(k, ByteString)]
+    -- ^ (journal key, encoded journal value)
+    -> ( [(k, PatchOp Key a)]
+       , [PatchOp Key a]
+       , [Transaction m cf d op ()]
+       )
+journalEntriesToReplayWork
+    journalIso
+    fromKV
+    _hashing
+    _csmtCol
+    journalCol
+    _prefix =
+        foldr convert ([], [], [])
+      where
+        treeKey =
+            treePrefix fromKV
+
+        convert (k, raw) (normalOps, updateOps, finalizers) =
+            case parseJournalEntry raw of
+                JournalInsert serializedV ->
+                    ( patchInsert k serializedV : normalOps
+                    , updateOps
+                    , finalizers
+                    )
+                JournalUpdateLegacy _ ->
+                    error
+                        "journalEntriesToReplayWork: legacy journal \
+                        \update cannot relocate value-derived tree \
+                        \prefix"
+                JournalUpdate serializedOld serializedNew ->
+                    let old = review journalIso serializedOld
+                        new = review journalIso serializedNew
+                        oldTreeKey =
+                            treeKey old <> view (isoK fromKV) k
+                        newTreeKey =
+                            treeKey new <> view (isoK fromKV) k
+                        updateOps' =
+                            if oldTreeKey == newTreeKey
+                                then
+                                    PatchInsert
+                                        newTreeKey
+                                        (fromV fromKV new)
+                                        : updateOps
+                                else
+                                    PatchDelete oldTreeKey
+                                        : PatchInsert
+                                            newTreeKey
+                                            (fromV fromKV new)
+                                        : updateOps
+                    in  ( normalOps
+                        , updateOps'
+                        , delete journalCol k : finalizers
+                        )
+                JournalDelete serializedV ->
+                    ( patchDelete k serializedV : normalOps
+                    , updateOps
+                    , finalizers
+                    )
+
+        patchInsert k serializedV =
+            let v = review journalIso serializedV
+            in  ( k
+                , PatchInsert
+                    (treeKey v <> view (isoK fromKV) k)
+                    (fromV fromKV v)
+                )
+
+        patchDelete k serializedV =
+            let v = review journalIso serializedV
+            in  ( k
+                , PatchDelete
+                    (treeKey v <> view (isoK fromKV) k)
+                )
+
+patchParallelTreeOnly
+    :: (GCompare d, Monad m)
+    => Int
+    -> Key
+    -> Hashing a
+    -> Selector d Key (Indirect a)
+    -> [PatchOp Key a]
+    -> [(Int, Transaction m cf d ops ())]
+patchParallelTreeOnly bucketBits pfx hashing csmtCol entries =
+    map mkBucketTx (Map.toList buckets)
+  where
+    prefixes = allPrefixes bucketBits
+
+    buckets =
+        foldl' addEntry Map.empty entries
+
+    addEntry m op =
+        let treeKey = opKey op
+            (bucket, stripped) = splitAt bucketBits treeKey
+            idx = bucketIndex bucket
+            op' = setOpKey stripped op
+        in  Map.insertWith (++) idx [op'] m
+
+    mkBucketTx (idx, ops) =
+        let bpfx = pfx <> (prefixes !! idx)
+        in  ( length ops
+            , mapM_ (applyOp bpfx) ops
+            )
+
+    applyOp bpfx (PatchInsert k v) =
+        insertingDirect bpfx hashing csmtCol k v
+    applyOp bpfx (PatchDelete k) =
+        deletingDirect bpfx hashing csmtCol k
+
+    opKey (PatchInsert k _) = k
+    opKey (PatchDelete k) = k
+
+    setOpKey k (PatchInsert _ v) = PatchInsert k v
+    setOpKey k (PatchDelete _) = PatchDelete k
+
 -- | Convert journal entries to 'PatchOp' pairs for
 -- 'patchParallel'.
 journalEntriesToPatchOps
@@ -1403,15 +1641,29 @@ journalEntriesToPatchOps
 journalEntriesToPatchOps journalIso fromKV = map convert
   where
     convert (k, raw) =
-        let (tag, serializedV) = parseJournalEntry raw
-            v = review journalIso serializedV
+        case parseJournalEntry raw of
+            JournalInsert serializedV ->
+                patchInsert k serializedV
+            JournalUpdateLegacy _ ->
+                error
+                    "journalEntriesToPatchOps: legacy journal update \
+                    \cannot relocate value-derived tree prefix"
+            JournalUpdate _ _ ->
+                error
+                    "journalEntriesToPatchOps: journal update needs \
+                    \update-aware replay"
+            JournalDelete serializedV ->
+                patchDelete k serializedV
+
+    patchInsert k serializedV =
+        let v = review journalIso serializedV
             treeKey =
                 treePrefix fromKV v <> view (isoK fromKV) k
             hash = fromV fromKV v
-        in  case tag of
-                JInsert ->
-                    (k, PatchInsert treeKey hash)
-                JUpdate ->
-                    (k, PatchInsert treeKey hash)
-                JDelete ->
-                    (k, PatchDelete treeKey)
+        in  (k, PatchInsert treeKey hash)
+
+    patchDelete k serializedV =
+        let v = review journalIso serializedV
+            treeKey =
+                treePrefix fromKV v <> view (isoK fromKV) k
+        in  (k, PatchDelete treeKey)
