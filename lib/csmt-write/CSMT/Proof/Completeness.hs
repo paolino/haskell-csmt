@@ -124,7 +124,7 @@ generateProof sel pfx targetPrefix = do
                 $ Just
                     CompletenessWitness
                         { cpMergeOps = mergeOps
-                        , cpInclusionSteps = reverse inclusionSteps
+                        , cpInclusionSteps = inclusionSteps -- subtree→root for 'foldInclusionSteps'
                         }
         Nothing -> do
             -- The walker returns 'Nothing' both when the column
