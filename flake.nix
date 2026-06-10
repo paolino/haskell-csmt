@@ -71,7 +71,7 @@
               # Nix reports the real hash via a fixed-output hash
               # mismatch — replace this literal.
               dependenciesHash =
-                "sha256-SFSSjHHtQa6ZzcjewMNxKLw8K1s/Qf+VyHSSXeDQtng=";
+                "sha256-wjsKzZxunTciN3YkY+0f9v3OA2e0qF9W1VdxNCFDHWQ=";
             }
           else
             null;

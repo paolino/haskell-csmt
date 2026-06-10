@@ -132,7 +132,8 @@ let
           csmt-verify-wasm \
           csmt-write-wasm \
           mpf-verify-wasm \
-          mpf-write-wasm
+          mpf-write-wasm \
+          mts:mpf-test-lib
     '';
 
     installPhase = ''
@@ -178,11 +179,17 @@ let
 
     buildPhase = ''
       export CABAL_DIR=$NIX_BUILD_TOP/cabal
+      # mts:mpf-test-lib is a library, not a wasm executable, so it emits no
+      # .wasm artifact — building it here is the regression guard that proves
+      # MPF.Test.Lib (pure mpf-write, no rocksdb mpf) cross-compiles to
+      # wasm32-wasi. If the `flag(wasm) buildable: False` gate ever returns or
+      # mpf-write breaks the pure path, this build fails loudly.
       wasm32-wasi-cabal --project-file=${projectFile} build \
         csmt-verify-wasm \
         csmt-write-wasm \
         mpf-verify-wasm \
-        mpf-write-wasm
+        mpf-write-wasm \
+        mts:mpf-test-lib
     '';
 
     installPhase = ''
