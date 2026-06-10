@@ -24,6 +24,10 @@ jobs:
         id: release
         with:
           release-type: simple
+          # Non-GITHUB_TOKEN identity so the release PR's branch push emits
+          # pull_request/push events — otherwise GitHub suppresses them for
+          # GITHUB_TOKEN-authored commits and the required checks never run.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
   publish:
     needs: release-please
@@ -42,10 +46,10 @@ jobs:
         run: nix --quiet bundle --bundler github:ralismark/nix-appimage .#mts -o mts.AppImage
 
       - name: Build RPM
-        run: nix --quiet bundle --bundler github:NixOS/bundlers#toRPM -o mts.rpm
+        run: nix --quiet bundle --bundler github:NixOS/bundlers#toRPM .#mts -o mts.rpm
 
       - name: Build DEB
-        run: nix --quiet bundle --bundler github:NixOS/bundlers#toDEB -o mts.deb
+        run: nix --quiet bundle --bundler github:NixOS/bundlers#toDEB .#mts -o mts.deb
 
       - name: Upload release artifacts
         env:
@@ -58,8 +62,9 @@ jobs:
           cp -L mts.AppImage mts-${TAG}.AppImage
           cp -L mts-image mts-${TAG}-docker.tar.gz
 
-          gh release upload ${TAG} \
+          nix --quiet shell nixpkgs#gh -c gh release upload "${TAG}" \
             mts-${TAG}.deb \
             mts-${TAG}.rpm \
             mts-${TAG}.AppImage \
-            mts-${TAG}-docker.tar.gz
+            mts-${TAG}-docker.tar.gz \
+            --clobber
