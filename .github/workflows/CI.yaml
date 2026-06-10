@@ -137,3 +137,18 @@ jobs:
             echo "FAIL: sorry found in proofs"
             exit 1
           fi
+
+  version-sync:
+    name: Cabal version matches manifest
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v6
+      - name: Assert mts.cabal version equals release manifest
+        run: |
+          man=$(sed -n 's/.*"\.":[[:space:]]*"\([^"]*\)".*/\1/p' .release-please-manifest.json)
+          cab=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' mts.cabal | head -1)
+          echo "manifest=$man cabal=$cab"
+          if [ "$cab" != "$man" ] && [ "$cab" != "${man}.0" ]; then
+            echo "::error::mts.cabal version ($cab) does not match release manifest ($man); release-please owns this — see release-please-config.json extra-files"
+            exit 1
+          fi
