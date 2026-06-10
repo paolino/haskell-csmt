@@ -1,5 +1,15 @@
 # Changelog for mts
 
+## [1.0.1](https://github.com/lambdasistemi/haskell-mts/compare/v1.0.0...v1.0.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **release:** close the cabal version block with x-release-please-end ([31b20e8](https://github.com/lambdasistemi/haskell-mts/commit/31b20e86eb25374329defa624d2d9f7e7e623c8c))
+* **release:** make release-please own the mts.cabal version ([cb99ee3](https://github.com/lambdasistemi/haskell-mts/commit/cb99ee3976893380f61220f4b463af389b38c93d))
+* **release:** repair publish upload and authenticate release-please ([9d30ae7](https://github.com/lambdasistemi/haskell-mts/commit/9d30ae72778bfca76bc65aa03ad3b41cf7be93f3))
+* **release:** run release-please in manifest mode so extra-files apply ([28c8d7b](https://github.com/lambdasistemi/haskell-mts/commit/28c8d7b18b34d4d6a4a2df8ed1289958346ce6f5))
+
 ## [1.0.0](https://github.com/lambdasistemi/haskell-mts/compare/v0.3.2...v1.0.0) (2026-06-10)
 
 
