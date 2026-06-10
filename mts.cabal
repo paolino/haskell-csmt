@@ -1,6 +1,10 @@
 cabal-version:   3.4
 name:            mts
-version:         0.4.0.0
+
+-- x-release-please-start-version
+version:         1.0.0
+
+-- x-release-please-end-version
 synopsis:        Merkle Tree Store with pluggable trie implementations
 description:
   MTS is a Haskell library providing a shared Merkle tree store
