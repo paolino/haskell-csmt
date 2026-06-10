@@ -23,7 +23,12 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          release-type: simple
+          # No release-type input on purpose: passing it makes the action
+          # ignore release-please-config.json (and its extra-files generic
+          # updater for mts.cabal), bumping only the manifest. Manifest mode
+          # reads release-type "simple" from the config file instead.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
           # Non-GITHUB_TOKEN identity so the release PR's branch push emits
           # pull_request/push events — otherwise GitHub suppresses them for
           # GITHUB_TOKEN-authored commits and the required checks never run.
