@@ -21,11 +21,11 @@ graph TD
 
 | Layer | Description |
 |-------|-------------|
-| **MTS Interface** | Shared `MerkleTreeStore` record with type families. Mode-indexed by `KVOnly` / `Full`. |
+| **MTS Interface** | Shared `MerkleTreeStore` GADT with type families. Mode-indexed by `KVOnly` / `Full`. |
 | **Ops GADT** | `CommonOps` + `Ops` GADT with bidirectional transitions (`toFull` / `toKVOnly`). |
 | **CSMT Implementation** | Binary trie with path compression, CBOR proofs, completeness proofs, CLI, crash recovery. |
-| **MPF Implementation** | 16-ary trie with hex nibble keys, batch/streaming inserts, Aiken-compatible hashes and proof-step verification. |
-| **Storage Backends** | RocksDB (persistent) and in-memory (testing) for both implementations. Three columns: KV, Trie, Journal. |
+| **MPF Implementation** | 16-ary trie with hex nibble keys, batch/streaming inserts, Aiken-compatible hashes, proof-step verification, completeness proofs. |
+| **Storage Backends** | RocksDB (persistent) and in-memory (testing) for both implementations. Four columns: KV, Trie, Journal, Metrics. |
 
 ### Components
 
@@ -41,8 +41,10 @@ graph TD
   verification for browser/Node.js.
 - **Browser WASM demos**: static demos for CSMT read-only verification, CSMT
   write/prove/verify, and MPF write/prove/verify.
+- **Rollbacks** (`mts:rollbacks`): a standalone swap-partition rollback log,
+  independent of the trie stores, with Lean 4 correctness proofs under
+  `lean/`.
 
 ## Planned
 
 - HTTP service exposing MTS operations via a RESTful API
-- MPF completeness proofs

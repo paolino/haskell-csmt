@@ -182,9 +182,13 @@ The same Aiken-parity work also backs the browser demo:
 
 ## Completeness Proofs
 
-MPF completeness proofs are not yet implemented. The `mtsCollectLeaves`,
-`mtsMkCompletenessProof`, and `mtsVerifyCompletenessProof` fields
-currently raise an error.
+MPF supports completeness proofs via the `MPF.Proof.Completeness`
+module (`collectMPFLeaves`, `generateMPFCompletenessProof`,
+`foldMPFCompletenessProof`). The proof is an `MPFCompose` tree
+structure that recomputes the root hash; the verifier checks that the
+supplied leaves match the proof and that the recomputed root matches
+the trusted root. The `mtsCollectLeaves`, `mtsMkCompletenessProof`, and
+`mtsVerifyCompletenessProof` fields are wired to these functions.
 
 ## Browser Demo
 

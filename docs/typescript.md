@@ -12,15 +12,22 @@ a Haskell runtime.
 
 ## Installation
 
+!!! note
+    `@paolino/csmt-verify` is not published to the public npm registry
+    yet. Use it from source until a release is published.
+
+Build it from the repository:
+
 ```bash
-npm install @paolino/csmt-verify
+cd verifiers/typescript
+npm install
+npm run build      # emits dist/, the package main
 ```
 
-Or with yarn:
-
-```bash
-yarn add @paolino/csmt-verify
-```
+Then consume it from another project by path, e.g. with
+`npm install /path/to/haskell-mts/verifiers/typescript`, or vendor the
+built `dist/` output. The import examples below assume the package is
+resolvable as `@paolino/csmt-verify`.
 
 ## Quick Start
 

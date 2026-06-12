@@ -1,34 +1,39 @@
 # Installation
 
-There is currently no releasing in place, but you can install via the provided artifacts from the CI.
-
-## Docker images
-
-```bash
-gh run download -n mts-image
-i=$(docker load < mts-image | sed -e 's/Loaded image: //')
-docker run $i
-```
+Releases are cut by release-please; each
+[GitHub release](https://github.com/lambdasistemi/haskell-mts/releases)
+ships Linux x86_64 artifacts for the `mts` CLI built from the nix flake.
 
 ## AppImage bundles
 
 ```bash
-gh run download -n mts.AppImage
-./mts.AppImage
+gh release download --repo lambdasistemi/haskell-mts --pattern '*.AppImage'
+chmod +x mts-v*.AppImage
+./mts-v*.AppImage --version
 ```
 
-## RPM packages
+## Docker images
+
+The tarball loads as `ghcr.io/paolino/mts/mts` with `mts` as entrypoint:
 
 ```bash
-gh run download -n mts-rpm
-sudo rpm -i mts.rpm
+gh release download --repo lambdasistemi/haskell-mts --pattern '*docker*'
+i=$(docker load < mts-v*-docker.tar.gz | sed -e 's/Loaded image: //')
+docker run $i --version
 ```
 
 ## DEB packages
 
 ```bash
-gh run download -n mts-deb
-sudo dpkg -i mts.deb
+gh release download --repo lambdasistemi/haskell-mts --pattern '*.deb'
+sudo dpkg -i mts-v*.deb
+```
+
+## RPM packages
+
+```bash
+gh release download --repo lambdasistemi/haskell-mts --pattern '*.rpm'
+sudo rpm -i mts-v*.rpm
 ```
 
 ## Building from source
@@ -58,7 +63,7 @@ cabal install
 ## WASM Outputs And Preview Commands
 
 The flake exports the combined browser-WASM bundle plus one package per
-module:
+module (x86_64-linux only, where the GHC WASM toolchain is available):
 
 ```bash
 nix build .#wasm-artifacts

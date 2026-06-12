@@ -15,32 +15,40 @@ definition.
 
 ### Basic Usage
 
-```haskell
-import MTS.Interface (MerkleTreeStore(..))
+KV operations come from `mtsKV`; tree operations (root hash, proofs,
+batch insert) come from `mtsTree` and require a `'Full`-mode store:
 
-example :: MerkleTreeStore imp IO -> IO ()
+```haskell
+import MTS.Interface
+    ( MerkleTreeStore, Mode (Full)
+    , MtsKV (..), MtsTree (..), mtsKV, mtsTree )
+
+example :: MerkleTreeStore 'Full imp IO -> IO ()
 example store = do
+    let kv   = mtsKV store
+        tree = mtsTree store
+
     -- Insert
-    mtsInsert store "key1" "value1"
-    mtsInsert store "key2" "value2"
+    mtsInsert kv "key1" "value1"
+    mtsInsert kv "key2" "value2"
 
     -- Root hash
-    mroot <- mtsRootHash store
+    mroot <- mtsRootHash tree
     print mroot
 
-    -- Inclusion proof
-    mp <- mtsMkProof store "key1"
+    -- Inclusion proof (returns the root hash alongside the proof)
+    mp <- mtsMkProof tree "key1"
     case mp of
         Nothing -> putStrLn "Key not found"
-        Just proof -> do
-            ok <- mtsVerifyProof store "value1" proof
+        Just (_root, proof) -> do
+            ok <- mtsVerifyProof tree "value1" proof
             print ok  -- True
 
     -- Batch insert
-    mtsBatchInsert store [("key3", "value3"), ("key4", "value4")]
+    mtsBatchInsert tree [("key3", "value3"), ("key4", "value4")]
 
     -- Delete
-    mtsDelete store "key1"
+    mtsDelete kv "key1"
 ```
 
 ### Constructing Stores
@@ -63,8 +71,8 @@ integration), use the `mts:csmt` sub-library directly.
 | `CSMT.Insertion` | `inserting`, `expandToBucketDepth`, `mergeSubtreeRoots` |
 | `CSMT.Deletion` | `deleting` |
 | `CSMT.Populate` | `patchParallel`, `PatchOp` — bucketed parallel replay |
-| `CSMT.Proof.Insertion` | `buildInclusionProof`, `verifyInclusionProof`, `computeRootHash` |
-| `CSMT.Proof.Completeness` | `generateProof`, `collectValues`, `foldProof` |
+| `CSMT.Proof.Insertion` | `buildInclusionProof`, `verifyInclusionProof`, `computeRootHash`, `foldProof` |
+| `CSMT.Proof.Completeness` | `generateProof`, `collectValues`, `foldCompletenessProof` |
 | `CSMT.Backend.RocksDB` | RocksDB persistent backend |
 | `CSMT.Backend.Pure` | In-memory backend for testing |
 | `CSMT.Backend.Standalone` | Column selectors and codecs |
@@ -72,57 +80,73 @@ integration), use the `mts:csmt` sub-library directly.
 
 ### Insert and Delete
 
+Every low-level tree operation takes a namespace prefix as its first
+argument (use `[]` for the root). `inserting`/`deleting` also take an
+explicit `Hashing` record:
+
 ```haskell
-import CSMT.Hashes (fromKVHashes)
+import CSMT.Hashes (fromKVHashes, hashHashing)
 import CSMT.Insertion (inserting)
 import CSMT.Deletion (deleting)
 
--- In a transaction context:
-inserting fromKVHashes hashing StandaloneKVCol StandaloneCSMTCol "key" "value"
-deleting  fromKVHashes hashing StandaloneKVCol StandaloneCSMTCol "key"
+-- In a transaction context (prefix [] = root):
+inserting [] fromKVHashes hashHashing StandaloneKVCol StandaloneCSMTCol "key" "value"
+deleting  [] fromKVHashes hashHashing StandaloneKVCol StandaloneCSMTCol "key"
 ```
+
+`CSMT.Hashes` also re-exports prefix-free convenience wrappers
+`insert`/`delete` (used by the CLI) that bake in `[]` and `hashHashing`.
 
 ### Inclusion Proofs
 
 ```haskell
 import CSMT.Proof.Insertion (buildInclusionProof, verifyInclusionProof)
 
--- Generate (in transaction)
-result <- buildInclusionProof fromKVHashes StandaloneKVCol StandaloneCSMTCol "key"
+-- Generate (in transaction); first arg is the namespace prefix
+result <- buildInclusionProof [] fromKVHashes StandaloneKVCol StandaloneCSMTCol "key"
 -- result :: Maybe (ByteString, InclusionProof Hash)
 
 -- Verify (pure, requires trusted root hash)
-verifyInclusionProof hashing trustedRootHash proof  -- :: Bool
+verifyInclusionProof hashHashing trustedRootHash proof  -- :: Bool
 ```
 
 ### Completeness Proofs
 
-```haskell
-import CSMT.Proof.Completeness (generateProof, collectValues, foldProof)
+`collectValues` and `generateProof` take the store's namespace prefix
+and the target prefix the proof should cover (both `[]` for a whole
+unnamespaced tree):
 
--- Collect leaves under a prefix
-leaves <- collectValues StandaloneCSMTCol prefix
+```haskell
+import CSMT.Proof.Completeness
+    (generateProof, collectValues, foldCompletenessProof)
+
+-- Collect leaves under the target prefix
+leaves <- collectValues StandaloneCSMTCol [] targetPrefix
 
 -- Generate proof
-mproof <- generateProof StandaloneCSMTCol prefix
+Just proof <- generateProof StandaloneCSMTCol [] targetPrefix
 
--- Verify
-let computed = foldProof (combineHash hashing) leaves proof
+-- Verify against a trusted root (pure); recomputes the root
+let computed = foldCompletenessProof hashHashing trustedRoot targetPrefix leaves proof
+-- computed :: Maybe Hash -- Just root on success
 ```
 
 ### Custom Key/Value Types
 
 ```haskell
+import Control.Lens (iso)
 import CSMT.Interface (FromKV(..))
 
 myFromKV :: FromKV MyKey MyValue Hash
 myFromKV = FromKV
-    { fromK      = myKeyToPath
+    { isoK       = iso myKeyToPath myPathToKey  -- Iso' MyKey Key
     , fromV      = myValueToHash
     , treePrefix = const []
     }
 ```
 
+`isoK` is an isomorphism between the external key type and the tree
+`Key` (a list of directions), so keys round-trip back out of proofs.
 The `treePrefix` field enables secondary indexing by prepending a prefix
 derived from the value to the tree key.
 
@@ -133,6 +157,7 @@ CSMT uses type-safe GADT column selectors:
 - `StandaloneKVCol` - Key-value column
 - `StandaloneCSMTCol` - CSMT tree column
 - `StandaloneJournalCol` - Journal column (KVOnly replay)
+- `StandaloneMetricsCol` - Persistent metrics counters (KV count, journal size)
 
 ### KVOnly Mode
 
@@ -247,28 +272,32 @@ use the `mts:mpf` sub-library directly.
 | `MPF.Deletion` | `deleting` |
 | `MPF.Proof.Insertion` | `mkMPFInclusionProof`, `verifyMPFInclusionProof`, `foldMPFProof` |
 | `MPF.Proof.Exclusion` | `mkMPFExclusionProof`, `verifyMPFExclusionProof`, `foldMPFExclusionProof` |
+| `MPF.Proof.Completeness` | `collectMPFLeaves`, `generateMPFCompletenessProof`, `foldMPFCompletenessProof` |
 | `MPF.Verify` | `verifyAikenInclusionProof`, `verifyAikenExclusionProof` |
 | `MPF.Backend.RocksDB` | RocksDB persistent backend |
 | `MPF.Backend.Pure` | In-memory backend for testing |
 | `MPF.Backend.Standalone` | Column selectors and codecs |
-| `MPF.MTS` | `MpfImpl`, `mpfMerkleTreeStore` |
+| `MPF.MTS` | `MpfImpl`, `mpfMerkleTreeStore`, `mpfKVOnlyStore`, `mpfReplayJournal` |
 
 ### Insert Modes
+
+Like CSMT, every MPF tree op takes a namespace prefix first (`[]` for
+the root):
 
 ```haskell
 import MPF.Insertion (inserting, insertingBatch, insertingChunked, insertingStream)
 
 -- Sequential (small datasets)
-inserting fromKV hashing kvCol mpfCol key value
+inserting [] fromKV hashing kvCol mpfCol key value
 
 -- Batch (medium datasets, O(n log n))
-insertingBatch fromKV hashing kvCol mpfCol [(k1, v1), (k2, v2)]
+insertingBatch [] fromKV hashing kvCol mpfCol [(k1, v1), (k2, v2)]
 
 -- Chunked (large datasets, bounded memory)
-insertingChunked fromKV hashing kvCol mpfCol chunkSize pairs
+insertingChunked [] fromKV hashing kvCol mpfCol chunkSize pairs
 
 -- Streaming (very large datasets, ~16x lower peak memory)
-insertingStream fromKV hashing kvCol mpfCol pairs
+insertingStream [] fromKV hashing kvCol mpfCol pairs
 ```
 
 ### Hex Key Operations
@@ -292,6 +321,8 @@ MPF uses its own GADT column selectors:
 
 - `MPFStandaloneKVCol` - Key-value column
 - `MPFStandaloneMPFCol` - MPF tree column
+- `MPFStandaloneJournalCol` - Journal column (KVOnly replay)
+- `MPFStandaloneMetricsCol` - Persistent metrics counters
 
 ### Aiken Proof Verification
 
@@ -312,7 +343,8 @@ These functions verify the exact proof-step bytes emitted by
 - `Nothing` from proof/root operations means "key not found" or "tree empty"
 - Invalid proofs return `False` from verification
 - Database errors surface as exceptions
-- MPF completeness proof operations currently `fail`
+- Constructing a `Full` store while the journal is non-empty `fail`s
+  (replay the journal first)
 
 ## Performance Tips
 
