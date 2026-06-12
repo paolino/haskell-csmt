@@ -27,14 +27,16 @@ CSMT is the original implementation in this package. It provides:
 
 ```haskell
 data FromKV k v a = FromKV
-    { fromK      :: k -> Key        -- User key to binary path
+    { isoK       :: Iso' k Key      -- User key <-> binary path (bidirectional)
     , fromV      :: v -> a           -- User value to hash
     , treePrefix :: v -> Key         -- Optional prefix for secondary indexing
     }
 ```
 
-The default `fromKVHashes` hashes both key and value with Blake2b-256 and
-uses no prefix (`treePrefix = const []`).
+`isoK` is an isomorphism (not a one-way function) so that proofs can
+recover the original key. The default `fromKVHashes` maps keys to/from
+their byte paths, hashes values with Blake2b-256, and uses no prefix
+(`treePrefix = const []`).
 
 ### `Indirect` - Tree Nodes
 
@@ -56,14 +58,16 @@ data Hashing a = Hashing
 
 ## Storage
 
-CSMT uses two columns:
+CSMT uses four RocksDB columns (KV, CSMT tree, journal, and metrics);
+the two that hold the data and tree are:
 
 | Column | Key | Value |
 |--------|-----|-------|
 | KV | User key (`k`) | User value (`v`) |
-| CSMT | `treePrefix(v) <> fromK(k)` | `Indirect a` (jump + hash) |
+| CSMT | `treePrefix(v) <> view isoK k` | `Indirect a` (jump + hash) |
 
-See [Storage Layer](architecture/storage.md) for serialization details.
+See [Storage Layer](architecture/storage.md) for the journal/metrics
+columns and serialization details.
 
 ## Inclusion Proofs
 
@@ -118,13 +122,13 @@ via the `PatchOp` type.
 ```haskell
 patchParallel
     :: (GCompare d, Ord jk, Monad m)
-    => Int                         -- bucket bits (e.g. 4 → 16 buckets)
-    -> Key                         -- global prefix
+    => Int                              -- bucket bits (e.g. 4 → 16 buckets)
+    -> Key                              -- global prefix (usually [])
     -> Hashing a
-    -> Selector d Key (Indirect a) -- CSMT column
-    -> Selector d jk v             -- journal column
-    -> [(jk, PatchOp Key a)]       -- (journal key, tree op) pairs
-    -> [Transaction m cf d ops ()] -- independent bucket transactions
+    -> Selector d Key (Indirect a)      -- CSMT column
+    -> Selector d jk v                  -- journal column
+    -> [(jk, PatchOp Key a)]            -- (journal key, tree op) pairs
+    -> [(Int, Transaction m cf d ops ())] -- (op count, txn) per active bucket
 ```
 
 Benchmarks on a development machine (RocksDB, `-O2 -threaded -N`):
@@ -171,7 +175,7 @@ A **sentinel flag** in the journal column brackets this sequence:
 3. mergeSubtreeRoots + delete sentinel (one transaction)
 ```
 
-If the process crashes between steps 1–4, the next `toFull` call
+If the process crashes between steps 1 and 3, the next `toFull` call
 detects the sentinel, runs `mergeSubtreeRoots` to fix the tree
 top, deletes the sentinel, then replays remaining journal entries
 normally.

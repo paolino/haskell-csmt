@@ -4,8 +4,13 @@ TypeScript library for verifying CSMT (Compact Sparse Merkle Tree) inclusion pro
 
 ## Installation
 
+This package is not published to the public npm registry yet. Build it
+from the repository and consume it by path:
+
 ```bash
-npm install @paolino/csmt-verify
+cd verifiers/typescript
+npm install
+npm run build      # emits dist/, the package main
 ```
 
 ## Usage

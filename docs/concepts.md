@@ -29,7 +29,7 @@ With these three hashes, anyone can recompute the root and verify the proof.
 
 ## MTS: The Shared Interface
 
-MTS defines a common `MerkleTreeStore` record that abstracts over the trie
+MTS defines a common `MerkleTreeStore` GADT that abstracts over the trie
 implementation. Type families determine the concrete key, value, hash, proof,
 leaf, and completeness proof types for each backend:
 
@@ -38,11 +38,13 @@ leaf, and completeness proof types for each backend:
 | `mtsInsert` | `MtsKey imp -> MtsValue imp -> m ()` |
 | `mtsDelete` | `MtsKey imp -> m ()` |
 | `mtsRootHash` | `m (Maybe (MtsHash imp))` |
-| `mtsMkProof` | `MtsKey imp -> m (Maybe (MtsProof imp))` |
+| `mtsMkProof` | `MtsKey imp -> m (Maybe (MtsHash imp, MtsProof imp))` |
 | `mtsVerifyProof` | `MtsValue imp -> MtsProof imp -> m Bool` |
 | `mtsBatchInsert` | `[(MtsKey imp, MtsValue imp)] -> m ()` |
 
-Application code written against `MerkleTreeStore imp m` works with either
+`mtsInsert`/`mtsDelete` live in the `MtsKV` record (both modes); the
+remaining operations live in `MtsTree` (`Full` mode only). Application
+code written against `MerkleTreeStore mode imp m` works with either
 CSMT or MPF. See [MTS Interface](interface.md) for the full API.
 
 ## Sparse Merkle Trees
@@ -166,23 +168,25 @@ a given set of entries is **all** entries under that prefix. It consists of:
 2. A sequence of merge operations to reconstruct the subtree
 3. Sibling hashes at the boundary to connect back to the root
 
-Completeness proofs are currently implemented for CSMT only. MPF
-completeness proofs are planned.
+Both CSMT and MPF implement completeness proofs (CSMT in
+`CSMT.Proof.Completeness`, MPF in `MPF.Proof.Completeness`).
 
 ## Storage Model
 
-Both implementations use a three-column storage model:
+Both implementations use a four-column storage model:
 
 | Column | Key | Value | Purpose |
 |--------|-----|-------|---------|
 | KV | User key | User value | Original key-value pairs |
 | Trie | Derived tree key | Node (jump + hash) | Merkle tree structure |
 | Journal | User key | Tagged value | KVOnly replay log |
+| Metrics | Counter name | Int | Persistent KV count / journal size |
 
 The tree key is derived from the user key (and optionally a prefix from
 the value) using the `FromKV`/`FromHexKV` conversion records. The Journal
 column records mutations made in KVOnly mode for later replay against the
-tree.
+tree, and the Metrics column maintains transactional counters for O(1)
+metrics queries.
 
 See [Storage Layer](architecture/storage.md) for implementation-specific
 details.
@@ -224,18 +228,23 @@ the journal column brackets the non-atomic `toFull` sequence:
 2. Replay loop (parallel bucket transactions)
 3. `mergeSubtreeRoots` + delete sentinel (atomic)
 
-If the process crashes between steps 1–4, the next `toFull` detects the
+If the process crashes between steps 1 and 3, the next `toFull` detects the
 sentinel, runs `mergeSubtreeRoots` to fix the tree top, then continues
 with the normal replay of remaining journal entries.
 
-The `DbState` type exposes this as a three-state open result:
+The `DbState` type exposes this as a two-state open result:
 
 - `NeedsRecovery` — sentinel found, must run recovery first
 - `Ready` — clean state, choose KVOnly or Full
 
 ## Rollbacks
 
-The `rollbacks` library implements a swap-partition model where two
-database partitions alternate between "live" and "staging" roles.
-Rollbacks discard the staging partition and swap back. Formal
-correctness is proved in Lean 4 (see `lean/` directory).
+The `rollbacks` library (`mts:rollbacks`) implements a swap-partition
+model: every mutation is a *swap*. Inserting, updating, or deleting a
+key puts a new binding into the state and yields the displaced
+binding, which is the inverse operation. The store records each
+rollback point's inverse log; `rollbackTo` replays those inverses in
+reverse order to restore an earlier state. The model and its
+correctness are formalized in Lean 4 — see `lean/Rollbacks/`
+(`SwapPartition.lean` for the model, `Rollback.lean` for the proofs).
+This library is independent of the CSMT/MPF trees.

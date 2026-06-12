@@ -43,19 +43,32 @@ Generate and verify self-contained inclusion proofs:
 
 The MTS package includes a command-line interface (CLI) tool for interacting with the CSMT tree. The CLI provides commands for adding/removing elements, generating proofs, and verifying membership.
 
-CLI works in interactive mode by default. You can also pass commands directly as stdin as we are doing in this manual.
+CLI works in interactive mode by default. You can also pass commands directly as stdin as we are doing in this manual. In piped mode, status messages are printed in their short form (e.g. `AddedKey` instead of `Added key, inclusion proof generated`).
 
+### Invocation
+
+```text
+mts DIR [--csmt-max-files INT] [--kv-max-files INT]
+```
+
+| Setting | Env var | Default | Meaning |
+| ------- | ------- | ------- | ------- |
+| `DIR` (argument) | `CSMT_DB_PATH` | required | Path to the RocksDB database |
+| `--csmt-max-files` | `CSMT_MAX_FILES` | 1 | Maximum number of CSMT column files |
+| `--kv-max-files` | `KV_MAX_FILES` | 1 | Maximum number of KV column files |
 
 ### List of commands
 | Command | Description                        | Arguments        | Return value                 |
 | ------- | ---------------------------------- | ---------------- | ---------------------------- |
-| `i`     | Insert a key-value pair            | key,  value      |                              |
+| `i`     | Insert a key-value pair            | key, value       |                              |
 | `d`     | Delete a key                       | key              |                              |
 | `q`     | Query inclusion proof for a key    | key              | base64 encoding of the proof |
 | `r`     | Get the current root of the CSMT   |                  | base64 encoding of the root  |
 | `v`     | Verify inclusion proof             | proof            | Valid or Invalid             |
 | `w`     | Query value for a key              | key              | value                        |
-| `c`     | Comment (no operation)             |                  |                              |
+| `p`     | Query node at partial key          | path (`LRLL...`), optional | node jump path + value hash |
+| `k`     | Show a key as tree directions      | key              | `LR...` direction string     |
+| `#`     | Comment (no operation)             | free text        |                              |
 
 ## Basic operations
 
@@ -79,10 +92,13 @@ Setup the environment variable `CSMT_DB_PATH` to point to a directory where the 
     ```
 === "Output"
     ```text
-    AQDjun1C8tTl1kdY1oon8sAQWL86/UMiJyZFswQ9Sf49XQAA
+    AddedKey
+    hJggAAEBAAEAAQEAAQEAAAEAAQABAQEBAAABAAABAQAAAAFYIBCf1UdGHyJjFT9Ie9m6K1UWWQ67U3o15jkbh4ifOE8RgJggAAEBAAEAAQEAAQEAAAEAAQABAQEBAAABAAABAQAAAAE=
     ```
 
-The `output` is the inclusion proof for `key1`. It will not change depending on the value associated with the key.
+The first line acknowledges the insert; the second is the
+base64-encoded CBOR inclusion proof for `key1`. The proof embeds the
+hash of the stored value, so it changes when the value changes.
 
 Now the database contains the value for `key1`, and you can query its inclusion proof at any time.
 
@@ -91,7 +107,7 @@ Now the database contains the value for `key1`, and you can query its inclusion 
 === "Input"
     ```bash
     mts <<$
-    v AQDjun1C8tTl1kdY1oon8sAQWL86/UMiJyZFswQ9Sf49XQAA
+    v hJggAAEBAAEAAQEAAQEAAAEAAQABAQEBAAABAAABAQAAAAFYIBCf1UdGHyJjFT9Ie9m6K1UWWQ67U3o15jkbh4ifOE8RgJggAAEBAAEAAQEAAQEAAAEAAQABAQEBAAABAAABAQAAAAE=
     $
     ```
 === "Output"
@@ -133,7 +149,7 @@ Now if you try to query for the inclusion proof of `key1` again:
     ```
 === "Output"
     ```text
-    NoProofFound
+    KeyNotFound
     ```
 
 
@@ -180,10 +196,10 @@ If you insert some keys first:
 === "Output"
     ```text
     AddedKey
-    NrJMih3czFriydMUwvFKFK6VYKZYVjKpKGe1WC4e+VU=
+    HZ9W8HqKzlkg3M7y1ivUYtAGm1qJ48zRCU8O3+CCf/A=
     AddedKey
-    jyW/0W96OAsUNpbd+SgA0B/ZjM8zGBOd3xR5Y1iOJOs=
+    yZANE8s5l49/d0foRE87Ict/9WZT4zaQjyDyccPmzXE=
     DeletedKey
-    NrJMih3czFriydMUwvFKFK6VYKZYVjKpKGe1WC4e+VU=
+    HZ9W8HqKzlkg3M7y1ivUYtAGm1qJ48zRCU8O3+CCf/A=
     TreeEmpty
     ```

@@ -15,6 +15,7 @@ type family MtsHash imp              -- Hash type
 type family MtsProof imp             -- Inclusion proof type
 type family MtsLeaf imp              -- Leaf type (for completeness proofs)
 type family MtsCompletenessProof imp -- Completeness proof type
+type family MtsPrefix imp            -- Namespace prefix type
 ```
 
 ### CSMT Type Instances
@@ -26,7 +27,8 @@ type family MtsCompletenessProof imp -- Completeness proof type
 | `MtsHash CsmtImpl` | `Hash` (Blake2b-256) |
 | `MtsProof CsmtImpl` | `InclusionProof Hash` |
 | `MtsLeaf CsmtImpl` | `Indirect Hash` |
-| `MtsCompletenessProof CsmtImpl` | `CompletenessProof` |
+| `MtsCompletenessProof CsmtImpl` | `CompletenessProof Hash` |
+| `MtsPrefix CsmtImpl` | `Key` |
 
 ### MPF Type Instances
 
@@ -37,7 +39,8 @@ type family MtsCompletenessProof imp -- Completeness proof type
 | `MtsHash MpfImpl` | `MPFHash` (Blake2b-256) |
 | `MtsProof MpfImpl` | `MPFProof MPFHash` |
 | `MtsLeaf MpfImpl` | `HexIndirect MPFHash` |
-| `MtsCompletenessProof MpfImpl` | `()` (not yet implemented) |
+| `MtsCompletenessProof MpfImpl` | `MPFCompose MPFHash` |
+| `MtsPrefix MpfImpl` | `HexKey` |
 
 ## MerkleTreeStore Record
 
@@ -49,9 +52,15 @@ data MerkleTreeStore (mode :: Mode) imp m where
     MkFull   :: MtsKV imp m -> MtsTree imp m -> MerkleTreeStore 'Full imp m
 ```
 
-`MtsKV` provides insert/delete/query. `MtsTree` provides root hash,
-proofs, batch insert, and completeness operations. In KVOnly mode,
-only KV operations are available.
+`MtsKV` provides `mtsInsert`, `mtsDelete`, and `mtsMetrics` (persistent
+KV/journal counters). `MtsTree` provides root hash, proofs, batch
+insert, leaf collection, and completeness operations. Use the `mtsKV`
+and `mtsTree` accessors to reach them; in `KVOnly` mode only KV
+operations are available.
+
+The `MtsTransition` record bundles a `KVOnly` store with a one-shot
+`transitionToFull` action that replays the journal and returns the
+`Full` store, disabling the `KVOnly` handle.
 
 ## Split-Mode Ops GADT
 
@@ -91,69 +100,82 @@ data Ops (mode :: Mode) m cf d ops k v a where
 
 ### `csmtMerkleTreeStore`
 
-Build a CSMT-backed store. Requires a natural transformation from the
-database monad to `IO`, a `Database` handle, a `FromKV` record, and a
-`Hashing` record:
+Build a CSMT-backed `Full` store. Takes the namespace prefix (`[]` for
+the root), a natural transformation from the database monad to `IO`, a
+`Database` handle, a `FromKV` record, and a `Hashing` record. Fails if
+the journal contains unplayed entries:
 
 ```haskell
 csmtMerkleTreeStore
     :: (MonadFail m)
-    => (forall b. m b -> IO b)
+    => Key                       -- prefix, [] for root
+    -> (forall b. m b -> IO b)
     -> Database m StandaloneCF (Standalone ByteString ByteString Hash) StandaloneOp
     -> FromKV ByteString ByteString Hash
     -> Hashing Hash
-    -> MerkleTreeStore CsmtImpl IO
+    -> IO (MerkleTreeStore 'Full CsmtImpl IO)
 ```
 
 ### `mpfMerkleTreeStore`
 
-Build an MPF-backed store. Same pattern, with MPF-specific types:
+Build an MPF-backed `Full` store. Same pattern, with MPF-specific types:
 
 ```haskell
 mpfMerkleTreeStore
     :: (MonadFail m)
-    => (forall b. m b -> IO b)
+    => HexKey                    -- prefix, [] for root
+    -> (forall b. m b -> IO b)
     -> Database m MPFStandaloneCF (MPFStandalone ByteString ByteString MPFHash) MPFStandaloneOp
     -> FromHexKV ByteString ByteString MPFHash
     -> MPFHashing MPFHash
-    -> MerkleTreeStore MpfImpl IO
+    -> IO (MerkleTreeStore 'Full MpfImpl IO)
 ```
+
+Both implementations also provide `KVOnly` constructors
+(`csmtKVOnlyStore`, `mpfKVOnlyStore`), managed transitions
+(`csmtManagedTransition`, `mpfManagedTransition`), and namespaced
+variants (`csmtNamespacedMTS`, `mpfNamespacedMTS`) that scope multiple
+independent trees inside one database via the `MtsPrefix` type.
 
 ## Usage Example
 
 From the test suite (`MTS.PropertySpec`), showing how to construct both
-stores:
+stores over the in-memory backends:
 
 ```haskell
 -- CSMT store using in-memory backend
-mkCsmtStore :: IO (MerkleTreeStore CsmtImpl IO)
+mkCsmtStore :: IO (MerkleTreeStore 'Full CsmtImpl IO)
 mkCsmtStore = do
     ref <- newIORef emptyInMemoryDB
-    let run action = do
+    let run :: forall b. Pure b -> IO b
+        run action = do
             db <- readIORef ref
             let (a, db') = runPure db action
             writeIORef ref db'
             pure a
-    pure $ csmtMerkleTreeStore run (pureDatabase csmtCodecs)
-                               fromKVHashes hashHashing
+    csmtMerkleTreeStore [] run (pureDatabase csmtCodecs)
+        fromKVHashes hashHashing
 
 -- MPF store using in-memory backend
-mkMpfStore :: IO (MerkleTreeStore MpfImpl IO)
+mkMpfStore :: IO (MerkleTreeStore 'Full MpfImpl IO)
 mkMpfStore = do
     ref <- newIORef emptyMPFInMemoryDB
-    let run action = do
+    let run :: forall b. MPFPure b -> IO b
+        run action = do
             db <- readIORef ref
             let (a, db') = runMPFPure db action
             writeIORef ref db'
             pure a
-    pure $ mpfMerkleTreeStore run (mpfPureDatabase mpfCodecs)
-                              fromHexKVBS mpfHashing
+    mpfMerkleTreeStore [] run (mpfPureDatabase mpfCodecs)
+        fromHexKVHashes mpfHashing
 ```
 
 ## Shared QuickCheck Properties
 
-The `MTS.Properties` module provides 12 properties that any
-`MerkleTreeStore` implementation should satisfy:
+The `MTS.Properties` module provides the shared property suite run by
+`MTS.PropertySpec` against both implementations: 13 parity properties
+over `Full` stores plus 6 journal/replay properties over the
+KVOnly-then-replay lifecycle.
 
 | # | Property | Description |
 |---|----------|-------------|
@@ -162,14 +184,24 @@ The `MTS.Properties` module provides 12 properties that any
 | 3 | `propInsertionOrderIndependence` | Same keys in any order produce the same root hash |
 | 4 | `propDeleteRemovesKey` | Insert k v, delete k, verify fails |
 | 5 | `propDeletePreservesSiblings` | Delete one key, other keys still verify |
-| 6 | `propBatchEqualsSequential` | Batch insert produces same root as sequential |
-| 7 | `propInsertDeleteAllEmpty` | Insert N, delete all N, root is Nothing |
-| 8 | `propEmptyTreeNoRoot` | Empty tree has no root hash |
-| 9 | `propSingleInsertHasRoot` | Single insert produces a root hash |
-| 10 | `propWrongValueRejects` | Verify with wrong value returns False |
+| 6 | `propInsertDeleteAllEmpty` | Insert N, delete all N, root is Nothing |
+| 7 | `propEmptyTreeNoRoot` | Empty tree has no root hash |
+| 8 | `propSingleInsertHasRoot` | Single insert produces a root hash |
+| 9 | `propWrongValueRejects` | Verify with wrong value returns False |
+| 10 | `propProofAnchoredToRoot` | Root returned by `mtsMkProof` matches `mtsFoldProof` |
 | 11 | `propCompletenessRoundTrip` | Insert N, completeness proof verifies |
 | 12 | `propCompletenessEmpty` | Empty tree has no completeness proof |
 | 13 | `propCompletenessAfterDelete` | Completeness proof verifies after partial deletion |
 
-CSMT passes all 13 properties. MPF passes properties 1-10; completeness
-properties (11-13) are pending implementation.
+Replay properties (per implementation):
+
+| # | Property | Description |
+|---|----------|-------------|
+| 14 | `propKVOnlyThenReplayMatchesFull` | KVOnly inserts + replay produce the same root as a Full store |
+| 15 | `propKVOnlyThenReplayProofsWork` | All keys have valid proofs after replay |
+| 16 | `propKVOnlyDeleteThenReplay` | Surviving keys verify after KVOnly deletes + replay |
+| 17 | `propReplayIdempotent` | Replaying an empty journal is a no-op |
+| 18 | `propJournalCompression` | Insert-then-delete in KVOnly leaves no trace after replay |
+| 19 | `propReplayTraceMonotonic` | Replay trace entries-remaining decreases monotonically |
+
+Both CSMT and MPF pass the full suite.

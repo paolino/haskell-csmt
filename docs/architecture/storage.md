@@ -1,22 +1,24 @@
 # Storage Layer
 
-Both MTS implementations use a three-column storage model with RocksDB as
+Both MTS implementations use a four-column storage model with RocksDB as
 the persistent backend and in-memory backends for testing.
 
 ## Shared Model
 
-Both CSMT and MPF store data in three columns:
+Both CSMT and MPF store data in four columns:
 
 | Column | Key | Value | Purpose |
 |--------|-----|-------|---------|
 | KV | User key (`k`) | User value (`v`) | Original key-value pairs |
 | Trie | Derived tree key | Node reference | Merkle tree structure |
 | Journal | User key (`k`) | Tagged value | KVOnly mode replay log |
+| Metrics | Counter name | Int | Persistent KV count / journal size |
 
 The KV column stores original key-value pairs, enabling value retrieval
 and proof generation. The trie column stores the Merkle tree structure
 with implementation-specific node types. The journal column records
-mutations made in KVOnly mode.
+mutations made in KVOnly mode, and the metrics column holds
+transactional counters (KV count, journal size) for O(1) metrics queries.
 
 ### Journal Entry Format
 
@@ -163,6 +165,7 @@ data Standalone k v a x where
     StandaloneKVCol      :: Standalone k v a (KV k v)
     StandaloneCSMTCol    :: Standalone k v a (KV Key (Indirect a))
     StandaloneJournalCol :: Standalone k v a (KV ByteString ByteString)
+    StandaloneMetricsCol :: Standalone k v a (KV ByteString Int)
 ```
 
 ---
@@ -253,8 +256,10 @@ putHexIndirect HexIndirect{hexJump, hexValue, hexIsLeaf} = do
 
 ```haskell
 data MPFStandalone k v a x where
-    MPFStandaloneKVCol  :: MPFStandalone k v a (KV k v)
-    MPFStandaloneMPFCol :: MPFStandalone k v a (KV HexKey (HexIndirect a))
+    MPFStandaloneKVCol      :: MPFStandalone k v a (KV k v)
+    MPFStandaloneMPFCol     :: MPFStandalone k v a (KV HexKey (HexIndirect a))
+    MPFStandaloneJournalCol :: MPFStandalone k v a (KV ByteString ByteString)
+    MPFStandaloneMetricsCol :: MPFStandalone k v a (KV ByteString Int)
 ```
 
 ---
