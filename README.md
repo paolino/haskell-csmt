@@ -3,101 +3,87 @@
 [![CI](https://github.com/lambdasistemi/haskell-mts/actions/workflows/CI.yaml/badge.svg)](https://github.com/lambdasistemi/haskell-mts/actions/workflows/CI.yaml)
 [![Documentation](https://github.com/lambdasistemi/haskell-mts/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/lambdasistemi/haskell-mts/actions/workflows/deploy-docs.yaml)
 
-A Haskell library providing a shared Merkle tree store interface with two
-implementations:
+Merkle Trees implementation in Haskell with persistent storage and Merkle proofs.
 
-- **CSMT** - Compact Sparse Merkle Tree (binary trie, path compression, CBOR
-  inclusion proofs)
-- **MPF** - Merkle Patricia Forest (16-ary trie, hex nibble keys, Aiken
-  compatible)
+## What is this
 
-Both implementations share a common `MerkleTreeStore` record. The shared
-QuickCheck property suite currently contains 13 properties: CSMT passes all
-13, while MPF passes the first 10 and still leaves completeness proofs
-pending.
+MTS is a Haskell library providing a shared interface for authenticated
+key-value stores backed by Merkle tries. It ships two implementations:
+
+- **CSMT** - Compact Sparse Merkle Tree: a binary trie with path
+  compression, CBOR-encoded inclusion and exclusion proofs, and
+  completeness proofs over prefix-grouped subtrees.
+- **MPF** - Merkle Patricia Forest: a 16-ary trie over hex nibble keys,
+  with root hashes and proof-step encodings compatible with the Aiken
+  reference implementation.
+
+Both implementations expose the same mode-indexed `MerkleTreeStore`
+GADT. In `Full` mode every mutation updates the trie, and root hash,
+inclusion, exclusion, and completeness proofs are available. In
+`KVOnly` mode mutations only append to a journal for fast ingest; the
+trie is rebuilt later by a parallel journal replay. Feature parity is
+enforced by a shared QuickCheck suite: 13 parity properties plus 6
+journal/replay properties, each run against both backends.
+
+The repository also contains a generic swap-partition rollback library
+(`mts:rollbacks`) whose core algorithms are proved correct in Lean 4
+(`lean/`), WASM builds of the pure write/verify paths powering
+in-browser demos, and a TypeScript verifier for CSMT proofs.
 
 > **Warning**: This project is in early development and is not production-ready.
 
-## Features
+## Architecture
 
-- **Shared interface**: `MerkleTreeStore` record parameterised by
-  implementation tag and monad, with type families for key/value/hash/proof
-  types
-- **Two trie backends**: Binary (CSMT) and 16-ary (MPF), swappable via the
-  shared interface
-- **Merkle proofs**: Inclusion and exclusion proofs for both implementations;
-  CSMT also supports completeness proofs
-- **Persistent storage**: RocksDB backend for both implementations
-- **Batch and streaming inserts**: MPF supports batch, chunked, and streaming
-  insertion modes
-- **Aiken compatibility**: MPF produces root hashes and proof-step encodings
-  matching the Aiken reference implementation
-- **Browser demos**: three static demos shipped through the docs site
-  (`csmt-verify.wasm`, `csmt-write.wasm`, `mpf-write.wasm` +
-  `mpf-verify.wasm`)
-- **CLI tool**: Interactive command-line interface for CSMT operations
-- **TypeScript verifier**: Client-side CSMT proof verification in
-  browser/Node.js
-- **Pure MPF verifier**: exact Aiken inclusion/exclusion verification in
-  Haskell via `MPF.Verify`
-
-## What Landed For MPF
-
-- explicit exclusion proofs with the same Aiken proof-step transport used for
-  inclusion proofs
-- a pure `MPF.Verify` module for exact Aiken proof-step verification
-- `mpf-write.wasm` and `mpf-verify.wasm`, wired into a browser demo that can
-  build, prove, and verify entirely in the browser
-- docs-site packaging for all three demos: CSMT verify, CSMT write, and MPF
-  write
-
-## Quick Start
-
-### Using the MTS Interface (recommended)
-
-```haskell
-import MTS.Interface (MerkleTreeStore(..))
-
--- Works with any implementation
-example :: MerkleTreeStore imp IO -> IO ()
-example store = do
-    mtsInsert store "key" "value"
-    proof <- mtsMkProof store "key"
-    root  <- mtsRootHash store
-    print (proof, root)
+```mermaid
+graph TD
+    CLI["mts executable<br/>interactive CSMT CLI"] --> CSMT
+    subgraph SUBLIBS["Cabal sublibraries"]
+        MTSI["mts<br/>MTS.Interface + shared properties"]
+        CSMTCORE["mts:csmt-core<br/>types, proof algebra, CBOR"]
+        CSMTW["mts:csmt-write<br/>pure backend, insert/delete, proofs"]
+        CSMT["mts:csmt<br/>RocksDB backend + CLI frontend"]
+        CSMTV["mts:csmt-verify<br/>pure Blake2b verification, WASM-safe"]
+        MPFW["mts:mpf-write<br/>pure backend, Aiken hashing, proofs"]
+        MPF["mts:mpf<br/>RocksDB backend"]
+        ROLL["mts:rollbacks<br/>swap-partition rollback log"]
+    end
+    CSMT --> CSMTW
+    CSMTW --> CSMTCORE
+    CSMTW --> MTSI
+    CSMTW --> CSMTV
+    CSMTV --> CSMTCORE
+    MPF --> MPFW
+    MPFW --> MTSI
+    MPFW --> CSMTV
+    WASM["WASM executables<br/>csmt/mpf write + verify demos"] --> CSMTW
+    WASM --> MPFW
+    WASM --> CSMTV
+    TS["TypeScript verifier<br/>verifiers/typescript"] -. "verifies CSMT proofs" .-> CSMTCORE
+    LEAN["Lean 4 proofs<br/>lean/"] -. "models" .-> ROLL
+    CSMT --> RDB[("RocksDB")]
+    MPF --> RDB
 ```
 
-### Constructing a CSMT Store
+## Install
 
-```haskell
-import CSMT.MTS (csmtMerkleTreeStore)
-import CSMT.Hashes (fromKVHashes, hashHashing)
-import CSMT.Backend.RocksDB (withStandaloneRocksDB)
+### Release artifacts
 
-main :: IO ()
-main = withStandaloneRocksDB "mydb" codecs $ \run db ->
-    let store = csmtMerkleTreeStore run db fromKVHashes hashHashing
-    in mtsInsert store "key" "value"
+Each [GitHub release](https://github.com/lambdasistemi/haskell-mts/releases)
+ships Linux x86_64 artifacts for the `mts` CLI: an AppImage, a `.deb`,
+an `.rpm`, and a docker image tarball.
+
+```bash
+gh release download --repo lambdasistemi/haskell-mts --pattern '*.AppImage'
+chmod +x mts-v*.AppImage
+./mts-v*.AppImage --version
 ```
 
-### Constructing an MPF Store
+The docker tarball loads as `ghcr.io/paolino/mts/mts`:
 
-```haskell
-import MPF.MTS (mpfMerkleTreeStore)
-import MPF.Hashes (fromHexKVAikenHashes, mpfHashing)
-import MPF.Backend.RocksDB (withMPFStandaloneRocksDB)
-
-main :: IO ()
-main = withMPFStandaloneRocksDB "mydb" codecs $ \run db ->
-    let store = mpfMerkleTreeStore run db fromHexKVAikenHashes mpfHashing
-    in mtsInsert store "key" "value"
+```bash
+gh release download --repo lambdasistemi/haskell-mts --pattern '*docker*'
+docker load < mts-v*-docker.tar.gz
 ```
-
-Use `fromHexKVAikenHashes` when you want the same hashed key path that the
-Aiken-compatible proofs and browser demo use. `fromHexKVHashes` still exists
-for direct raw-byte-to-nibble routing.
-
-## Installation
 
 ### Using Nix
 
@@ -114,9 +100,78 @@ Requires a working Haskell environment and RocksDB development files:
 cabal install
 ```
 
-## WASM Outputs With Nix
+## Quickstart
 
-The flake exports both the combined WASM bundle and the individual modules:
+Point the CLI at a database directory and pipe commands in:
+
+```bash
+export CSMT_DB_PATH=./mydb
+mts <<'EOF'
+i key1 value1
+q key1
+r
+EOF
+```
+
+```text
+AddedKey
+hJggAAEBAAEAAQEAAQEAAAEAAQABAQEBAAABAAABAQAAAAFYIBCf1UdGHyJjFT9Ie9m6K1UWWQ67U3o15jkbh4ifOE8RgJggAAEBAAEAAQEAAQEAAAEAAQABAQEBAAABAAABAQAAAAE=
+HZ9W8HqKzlkg3M7y1ivUYtAGm1qJ48zRCU8O3+CCf/A=
+```
+
+Run `mts` without piping for an interactive session with the same
+commands. See the [CLI manual](https://lambdasistemi.github.io/haskell-mts/manual/)
+for the full command set.
+
+## Usage
+
+### Library
+
+`MerkleTreeStore` is indexed by mode: KV operations live in the
+`MtsKV` record (always available), tree operations in `MtsTree`
+(only in `Full` mode). Construct a CSMT-backed store with
+`csmtMerkleTreeStore`, here over the in-memory backend:
+
+```haskell
+import CSMT.Backend.Pure (emptyInMemoryDB, pureDatabase, runPure)
+import CSMT.Hashes (fromKVHashes, hashHashing)
+import CSMT.Interface (csmtCodecs)
+import CSMT.MTS (csmtMerkleTreeStore)
+import Data.IORef (newIORef, readIORef, writeIORef)
+import MTS.Interface (MtsKV (..), MtsTree (..), mtsKV, mtsTree)
+
+main :: IO ()
+main = do
+    ref <- newIORef emptyInMemoryDB
+    let run action = do
+            db <- readIORef ref
+            let (a, db') = runPure db action
+            writeIORef ref db'
+            pure a
+    store <-
+        csmtMerkleTreeStore [] run (pureDatabase csmtCodecs)
+            fromKVHashes hashHashing
+    mtsInsert (mtsKV store) "key" "value"
+    mproof <- mtsMkProof (mtsTree store) "key"
+    mroot <- mtsRootHash (mtsTree store)
+    print (() <$ mproof, () <$ mroot)
+```
+
+The first argument is the namespace prefix (`[]` for the root). The
+MPF equivalent is `mpfMerkleTreeStore` from `MPF.MTS` with
+`fromHexKVAikenHashes`/`mpfHashing` from `MPF.Hashes`. For persistent
+storage use `withRocksDB` from `CSMT.Backend.RocksDB` (or
+`withMPFRocksDB` from `MPF.Backend.RocksDB`) to obtain the database
+handle, as done by the CLI frontend in `CSMT.Frontend.CLI.App`.
+
+Use `fromHexKVAikenHashes` when you want the same hashed key path that
+the Aiken-compatible proofs and browser demo use. `fromHexKVHashes`
+routes raw key bytes directly to nibbles.
+
+### WASM outputs
+
+The flake exports the combined WASM bundle and the individual modules
+(x86_64-linux only):
 
 ```bash
 nix build .#wasm-artifacts
@@ -135,20 +190,6 @@ PORT=8002 nix run .#mpf-wasm-write-demo
 PORT=8003 nix run .#docs
 ```
 
-## CLI Tool
-
-The `mts` executable provides an interactive CLI for CSMT operations:
-
-```bash
-export CSMT_DB_PATH=./mydb
-mts
-> i key1 value1
-> q key1
-AQDjun1C8tTl1kdY1oon8sAQWL86/UMiJyZFswQ9Sf49XQAA
-> r
-NrJMih3czFriydMUwvFKFK6VYKZYVjKpKGe1WC4e+VU=
-```
-
 ## Documentation
 
 Full documentation at [lambdasistemi.github.io/haskell-mts](https://lambdasistemi.github.io/haskell-mts/)
@@ -160,6 +201,25 @@ Useful entry points:
 - [CSMT WASM verifier demo](https://lambdasistemi.github.io/haskell-mts/wasm-demo/)
 - [CSMT WASM write demo](https://lambdasistemi.github.io/haskell-mts/wasm-write-demo/)
 - [MPF WASM write demo](https://lambdasistemi.github.io/haskell-mts/wasm-mpf-demo/)
+
+For AI agents, start at [AGENTS.md](AGENTS.md).
+
+## Development
+
+The nix dev shell carries GHC, cabal, just, fourmolu, mkdocs, and the
+asciinema tooling:
+
+```bash
+nix develop
+just build         # cabal build all (tests + benchmarks)
+just test          # unit tests; just test "pattern" to filter
+just format        # fourmolu + cabal-fmt + nixfmt
+just lean          # build the Lean 4 proofs
+just serve-docs    # mkdocs live preview
+```
+
+`just` lists all recipes. CI runs the build, unit tests, benchmarks,
+TypeScript verifier tests, and formatting checks via the flake.
 
 ## License
 
