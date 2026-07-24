@@ -1,12 +1,12 @@
 # Tasks — #169 MPF completeness parity
 
 ## Slice A — pure verifyMPFCompletenessProof
-- [ ] T169-S1 RED: `test/MPF/Proof/CompletenessSpec.hs` asserts
+- [X] T169-S1 RED: `test/MPF/Proof/CompletenessSpec.hs` asserts
       `verifyMPFCompletenessProof` accepts an honest complete leaf set and
       rejects extra-leaf, missing-leaf, and wrong-root cases; observed failing.
-- [ ] T169-S1 GREEN: implement + export `verifyMPFCompletenessProof` as the
+- [X] T169-S1 GREEN: implement + export `verifyMPFCompletenessProof` as the
       trusted-root wrapper over `foldMPFCompletenessProof`, mirroring
-      `verifyMPFExclusionProof`; register the spec in `mpf-unit-tests`.
+      `verifyMPFExclusionProof`; register the spec in the `unit-tests` suite.
 
 ## Slice B — Aiken parity
 - [ ] T169-S2 completeness proof round-trips through the shared `MPFProofStep`

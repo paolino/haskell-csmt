@@ -18,6 +18,7 @@ module MPF.Proof.Completeness
     ( collectMPFLeaves
     , generateMPFCompletenessProof
     , foldMPFCompletenessProof
+    , verifyMPFCompletenessProof
     , extractLeaves
     )
 where
@@ -120,6 +121,24 @@ foldMPFCompletenessProof hashing leaves proof =
     in  if sort extracted == sort leaves
             then Just computedRoot
             else Nothing
+
+-- |
+-- Verify a completeness proof against a trusted root.
+--
+-- Checks the claimed complete leaf set against the proof and
+-- compares the recomputed root hash to the trusted root.
+verifyMPFCompletenessProof
+    :: (Ord a)
+    => MPFHashing a
+    -> Maybe a
+    -- ^ Trusted root hash
+    -> [HexIndirect a]
+    -- ^ Claimed complete leaf set
+    -> MPFCompose a
+    -- ^ The completeness proof
+    -> Bool
+verifyMPFCompletenessProof hashing trustedRoot leaves proof =
+    trustedRoot == foldMPFCompletenessProof hashing leaves proof
 
 -- |
 -- Extract all leaves from an 'MPFCompose' tree with their full

@@ -537,6 +537,7 @@ test-suite unit-tests
     MPF.InsertionSpec
     MPF.InterfaceSpec
     MPF.NamespaceSpec
+    MPF.Proof.CompletenessSpec
     MPF.Proof.ExclusionSpec
     MPF.Proof.InsertionSpec
     MPF.ProofCompatSpec
