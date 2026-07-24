@@ -15,13 +15,15 @@
       folds subtree → anchor → full root; empty-prefix via exclusion.
 
 ## Slice B2 — property tests for anchored completeness (expect a RED bug)
-- [ ] T169-S4 RED: QuickCheck property tests (random tree + random internal-node
-      prefix, mirror ExclusionSpec generators) — honest verifies against the full
-      root; tampered/extra/missing rejects; absent prefix via exclusion. Observed
-      (fail with counterexample, or pass = coverage-only). No coverage-gating.
-- [ ] T169-S4 GREEN (only if a bug surfaced): fix the anchor
-      (Completeness.hs / Insertion.hs helpers) so the property holds — without
-      weakening the property or narrowing the generator.
+- [X] T169-S4 RED: QuickCheck property tests (random tree + random prefix, mirror
+      ExclusionSpec generators) — honest verifies against the full root;
+      tampered/extra/missing rejects; absent via exclusion. Found two non-aligned
+      failures: within-jump present + absent-past-leaf. No coverage-gating.
+- [X] T169-S4 outcome: NOT fixed — both non-aligned failures are the unsolved
+      open problem #171. Landed honestly: exact-node + aligned-absent properties
+      pass on genuinely-varied generators; within-jump and absent-past-leaf kept
+      as documented `expectFailure` baselines (seeds 290458383 / 1129545320)
+      referencing #171. Tests-only; no Completeness.hs/Insertion.hs/Exclusion.hs fix.
 
 ## Slice C — byte codec + WASM verifier
 - [ ] T169-S3 render/parse codec + WASM-compilable verifier; `mpf-verify-wasm`
