@@ -1,18 +1,19 @@
-# Tasks — #169 MPF completeness parity
+# Tasks — #169 MPF anchored prefix completeness
 
-## Slice A — pure verifyMPFCompletenessProof
-- [X] T169-S1 RED: `test/MPF/Proof/CompletenessSpec.hs` asserts
-      `verifyMPFCompletenessProof` accepts an honest complete leaf set and
-      rejects extra-leaf, missing-leaf, and wrong-root cases; observed failing.
-- [X] T169-S1 GREEN: implement + export `verifyMPFCompletenessProof` as the
-      trusted-root wrapper over `foldMPFCompletenessProof`, mirroring
-      `verifyMPFExclusionProof`; register the spec in the `unit-tests` suite.
+## Slice A — trivial full-tree verifier (MERGED)
+- [X] T169-S1 RED: CompletenessSpec asserts verifyMPFCompletenessProof over the
+      full tree (accept honest; reject extra-leaf, missing-leaf, wrong-root).
+- [X] T169-S1 GREEN: verifyMPFCompletenessProof = trustedRoot == fold; registered
+      in the `unit-tests` suite.
 
-## Slice B — Aiken parity
-- [ ] T169-S2 completeness proof round-trips through the shared `MPFProofStep`
-      Aiken codec; Aiken-side verify accepts honest / rejects tampered; existing
-      inclusion+exclusion Aiken bytes unchanged.
+## Slice B — anchored prefix completeness (the hard problem)
+- [ ] T169-S2 RED: CompletenessSpec proves the complete key set under a
+      **non-`[]` internal-node prefix** against the **full** root, and rejects
+      extra-leaf, missing-leaf, tampered-anchor, and wrong-root; observed failing.
+- [ ] T169-S2 GREEN: `MPFCompletenessProof` (Witness{subtree, anchorSteps} |
+      Empty exclusion); `generate` emits subtree + anchor steps to root; `verify`
+      folds subtree → anchor → full root; empty-prefix via exclusion.
 
-## Slice C — WASM opcode
-- [ ] T169-S3 `mpf-verify-wasm` opcode `2` verifies a completeness proof;
-      `mpf-write-wasm` emits `ptCompleteness`; empty-prefix via exclusion path.
+## Slice C — byte codec + WASM verifier
+- [ ] T169-S3 render/parse codec + WASM-compilable verifier; `mpf-verify-wasm`
+      opcode `2`; `mpf-write-wasm` `ptCompleteness`; empty-prefix via exclusion.
