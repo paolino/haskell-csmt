@@ -7,10 +7,10 @@
       in the `unit-tests` suite.
 
 ## Slice B — anchored prefix completeness (the hard problem)
-- [ ] T169-S2 RED: CompletenessSpec proves the complete key set under a
+- [X] T169-S2 RED: CompletenessSpec proves the complete key set under a
       **non-`[]` internal-node prefix** against the **full** root, and rejects
       extra-leaf, missing-leaf, tampered-anchor, and wrong-root; observed failing.
-- [ ] T169-S2 GREEN: `MPFCompletenessProof` (Witness{subtree, anchorSteps} |
+- [X] T169-S2 GREEN: `MPFCompletenessProof` (Witness{subtree, anchorSteps} |
       Empty exclusion); `generate` emits subtree + anchor steps to root; `verify`
       folds subtree → anchor → full root; empty-prefix via exclusion.
 

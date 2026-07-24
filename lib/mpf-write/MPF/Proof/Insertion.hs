@@ -5,12 +5,15 @@ module MPF.Proof.Insertion
     , MPFProofStep (..)
     , MerkleProofItem (..)
     , mkMPFInclusionProof
+    , mkMPFNodeInclusionSteps
     , foldMPFProof
+    , foldMPFProofFrom
     , verifyMPFInclusionProof
     )
 where
 
 import Control.Monad (guard)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT (MaybeT, runMaybeT))
 import Data.List (foldl', isPrefixOf)
 import Data.Map.Strict (Map)
@@ -166,16 +169,68 @@ mkMPFInclusionProof prefix FromHexKV{fromHexK} hashing sel k =
         guard $ isPrefixOf childJump ks
         let remaining = drop (length childJump) ks
         -- Fetch all sibling details (excluding our
-        -- position x)
+        -- position x) and build this branch's step.
         sibDetails <-
-            MaybeT
-                $ Just
-                    <$> fetchSiblingDetails
-                        sel
-                        (dbPath <> branchJump)
-                        x
-        let nonEmpty = Map.toList sibDetails
-        step <- case nonEmpty of
+            lift
+                $ fetchSiblingDetails
+                    sel
+                    (dbPath <> branchJump)
+                    x
+        step <-
+            lift
+                $ buildInclusionStep
+                    hashing
+                    sel
+                    (dbPath <> branchJump)
+                    logicalPath
+                    branchJump
+                    x
+                    (Map.toList sibDetails)
+        if hexIsLeaf
+            then pure ([step], childJump, childValue)
+            else do
+                let nextDbPath =
+                        dbPath <> branchJump <> [x]
+                let nextLogicalPath =
+                        logicalPath <> branchJump <> [x]
+                (restSteps, leafSuffix, valHash) <-
+                    go
+                        nextDbPath
+                        nextLogicalPath
+                        childJump
+                        remaining
+                pure (step : restSteps, leafSuffix, valHash)
+
+-- | Build the inclusion step for a single branch point, given the
+-- non-empty siblings (excluding our position).
+--
+-- Shared by the key-driven 'mkMPFInclusionProof' walk and the
+-- node-anchored 'mkMPFNodeInclusionSteps' walk so the branch/fork
+-- sibling hashing lives in exactly one place.
+buildInclusionStep
+    :: (Monad m, GCompare d)
+    => MPFHashing a
+    -> Selector d HexKey (HexIndirect a)
+    -> HexKey
+    -- ^ Branch storage path (siblings are queried below this)
+    -> HexKey
+    -- ^ Logical path consumed so far (for a neighbor leaf's full key)
+    -> HexKey
+    -- ^ Branch jump
+    -> HexDigit
+    -- ^ Our position
+    -> [(HexDigit, HexIndirect a)]
+    -- ^ Non-empty siblings
+    -> Transaction m cf d ops (MPFProofStep a)
+buildInclusionStep
+    hashing
+    sel
+    branchPath
+    logicalPath
+    branchJump
+    x
+    nonEmpty =
+        case nonEmpty of
             -- Exactly 1 sibling that is a leaf
             [ ( d
                     , HexIndirect
@@ -192,16 +247,12 @@ mkMPFInclusionProof prefix FromHexKV{fromHexK} hashing sel k =
                                 <> sibSuffix
                     in  pure
                             $ ProofStepLeaf
-                                { pslBranchJump =
-                                    branchJump
+                                { pslBranchJump = branchJump
                                 , pslOurPosition = x
-                                , pslNeighborKeyPath =
-                                    fullKey
+                                , pslNeighborKeyPath = fullKey
                                 , pslNeighborNibble = d
-                                , pslNeighborSuffix =
-                                    sibSuffix
-                                , pslNeighborValueDigest =
-                                    sibVal
+                                , pslNeighborSuffix = sibSuffix
+                                , pslNeighborValueDigest = sibVal
                                 }
             -- Exactly 1 sibling that is a branch
             [ ( d
@@ -212,64 +263,81 @@ mkMPFInclusionProof prefix FromHexKV{fromHexK} hashing sel k =
                     )
                 ] -> do
                     mr <-
-                        MaybeT
-                            $ Just
-                                <$> fetchBranchMerkleRoot
-                                    hashing
-                                    sel
-                                    ( dbPath
-                                        <> branchJump
-                                        <> [d]
-                                    )
-                                    sibPrefix
+                        fetchBranchMerkleRoot
+                            hashing
+                            sel
+                            (branchPath <> [d])
+                            sibPrefix
                     pure
                         $ ProofStepFork
-                            { psfBranchJump =
-                                branchJump
+                            { psfBranchJump = branchJump
                             , psfOurPosition = x
-                            , psfNeighborPrefix =
-                                sibPrefix
+                            , psfNeighborPrefix = sibPrefix
                             , psfNeighborIndex = d
                             , psfMerkleRoot = mr
                             }
-            -- Multiple siblings: branch step with
-            -- Merkle proof
+            -- Multiple siblings: branch step with Merkle proof
             _ ->
                 let nodeHashes =
-                        [ (d, computeNodeHash d')
+                        [ (d, computeNodeHash' hashing d')
                         | (d, d') <- nonEmpty
                         ]
                 in  pure
                         $ ProofStepBranch
                             { psbJump = branchJump
                             , psbPosition = x
-                            , psbSiblingHashes =
-                                nodeHashes
+                            , psbSiblingHashes = nodeHashes
                             }
-        if hexIsLeaf
-            then pure ([step], childJump, childValue)
-            else do
-                let nextDbPath =
-                        dbPath <> branchJump <> [x]
-                let nextLogicalPath =
-                        logicalPath <> branchJump <> [x]
-                (restSteps, leafSuffix, valHash) <-
-                    go
-                        nextDbPath
-                        nextLogicalPath
-                        childJump
-                        remaining
-                pure (step : restSteps, leafSuffix, valHash)
 
-    computeNodeHash
-        HexIndirect
-            { hexJump
-            , hexValue
-            , hexIsLeaf = isLeaf
-            } =
-            if isLeaf
-                then leafHash hashing hexJump hexValue
-                else hexValue
+-- | Collect the inclusion steps anchoring an internal node (at
+-- @target@) to the tree root scoped by @prefix@.
+--
+-- Unlike 'mkMPFInclusionProof', which walks root-to-leaf, this walks
+-- root-to-node and returns the branch/fork steps from the node
+-- outward to the root (node→root order, ready for 'foldMPFProofFrom').
+-- Empty when @target@ is the scoped root itself.
+mkMPFNodeInclusionSteps
+    :: (Monad m, GCompare d)
+    => HexKey
+    -- ^ Prefix (use @[]@ for root)
+    -> MPFHashing a
+    -> Selector d HexKey (HexIndirect a)
+    -> HexKey
+    -- ^ Target internal-node path
+    -> Transaction m cf d ops (Maybe [MPFProofStep a])
+mkMPFNodeInclusionSteps prefix hashing sel target = runMaybeT $ do
+    HexIndirect{hexJump = rootJump} <- MaybeT $ query sel prefix
+    if target == prefix
+        then pure []
+        else reverse <$> goNode prefix [] rootJump
+  where
+    goNode dbPath logicalPath branchJump = do
+        let base = dbPath <> branchJump
+        case drop (length base) target of
+            [] -> pure []
+            (x : _) -> do
+                sibDetails <- lift $ fetchSiblingDetails sel base x
+                step <-
+                    lift
+                        $ buildInclusionStep
+                            hashing
+                            sel
+                            base
+                            logicalPath
+                            branchJump
+                            x
+                            (Map.toList sibDetails)
+                let childDbPath = base <> [x]
+                HexIndirect{hexJump = childJump} <-
+                    MaybeT $ query sel childDbPath
+                if childDbPath == target
+                    then pure [step]
+                    else
+                        (step :)
+                            <$> goNode
+                                childDbPath
+                                (logicalPath <> branchJump <> [x])
+                                childJump
 
 -- | Fetch all non-empty sibling details at a branch
 -- point (excluding the given digit).
@@ -356,19 +424,24 @@ foldMPFProof :: MPFHashing a -> MPFProof a -> a
 foldMPFProof
     hashing
     MPFProof{mpfProofSteps, mpfProofLeafSuffix, mpfProofValueHash} =
-        let valueHash = mpfProofValueHash
-        in  case mpfProofSteps of
-                [] ->
-                    leafHash hashing mpfProofLeafSuffix valueHash
-                steps ->
-                    let leafNodeHash =
-                            leafHash
-                                hashing
-                                mpfProofLeafSuffix
-                                valueHash
-                    in  foldl' step leafNodeHash steps
-      where
-        step acc proofStep =
+        foldMPFProofFrom
+            hashing
+            (leafHash hashing mpfProofLeafSuffix mpfProofValueHash)
+            mpfProofSteps
+
+-- | Fold inclusion-proof steps outward from an arbitrary starting
+-- node hash.
+--
+-- Each step combines the accumulator (the node hash at our position)
+-- with its siblings to reconstruct the parent branch hash.
+-- 'foldMPFProof' is the special case whose starting node is a leaf
+-- (its hash computed via 'leafHash'); an anchored completeness proof
+-- starts from an internal subtree-root hash instead.
+foldMPFProofFrom :: MPFHashing a -> a -> [MPFProofStep a] -> a
+foldMPFProofFrom hashing = foldl' (applyProofStep hashing)
+
+applyProofStep :: MPFHashing a -> a -> MPFProofStep a -> a
+applyProofStep hashing acc proofStep =
             case proofStep of
                 ProofStepBranch
                     { psbJump
