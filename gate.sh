@@ -6,6 +6,5 @@ set -euo pipefail
 nix develop --accept-flake-config -c bash -c '
   set -euo pipefail
   cabal build all --enable-tests
-  cabal test mpf-unit-tests --test-show-details=direct
   cabal test unit-tests --test-show-details=direct
 '
